@@ -1,4 +1,4 @@
-import { TooltipAnchor } from '@librechat/client';
+import { Button, TooltipAnchor } from '@librechat/client';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '~/utils';
 
@@ -32,19 +32,20 @@ export default function OptionToggle({
       description={tooltip ?? label}
       side="top"
       render={
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={onToggle}
           aria-pressed={pressed}
           aria-label={label}
           className={cn(
-            'flex items-center justify-center rounded-md transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ring-primary',
+            'rounded-md',
             size === 'sm' ? 'size-6' : 'size-7',
             pressed ? activeClass : 'text-text-secondary hover:text-text-primary',
           )}
         >
           <Icon className="size-4" aria-hidden="true" />
-        </button>
+        </Button>
       }
     />
   );
