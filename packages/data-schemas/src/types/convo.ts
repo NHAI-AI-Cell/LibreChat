@@ -39,6 +39,7 @@ export interface IConversation extends Document {
   instructions?: string;
   stop?: string[];
   isArchived?: boolean;
+  importedFrom?: { source: string; externalId: string };
   pinned?: boolean;
   iconURL?: string;
   greeting?: string;
