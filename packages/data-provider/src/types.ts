@@ -638,7 +638,7 @@ export type TImportProgress = {
 };
 
 export type TImportSummary = {
-  source: 'chatgpt' | 'chatgpt-legacy' | 'claude' | 'chatbotui' | 'librechat';
+  source: 'chatgpt' | 'chatgpt-legacy' | 'claude' | 'grok' | 'chatbotui' | 'librechat';
   manifestVersion: number | null;
   conversations: number;
   shards: number;
