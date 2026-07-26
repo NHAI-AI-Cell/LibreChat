@@ -13,6 +13,7 @@ import { ParallelContentRenderer, type PartWithIndex } from './ParallelContent';
 import { EditTextPart, EmptyText, AgentUpdate } from './Parts';
 import { MessageContext, SearchContext } from '~/Providers';
 import PendingSkillCall from './Parts/PendingSkillCall';
+import PendingSteers from './Parts/PendingSteers';
 import ApprovalProvider from './ApprovalContext';
 import MemoryArtifacts from './MemoryArtifacts';
 import ToolCallGroup from './ToolCallGroup';
@@ -441,6 +442,9 @@ const ContentParts = memo(function ContentParts({
           renderPart={renderPart}
           renderResumeAttribution={renderResumeAttribution}
         />
+        {isLast && isSubmitting && conversationId != null && (
+          <PendingSteers conversationId={conversationId} />
+        )}
       </ApprovalProvider>
     );
   }
@@ -484,6 +488,9 @@ const ContentParts = memo(function ContentParts({
           );
           return nodes;
         })}
+        {isLast && isSubmitting && conversationId != null && (
+          <PendingSteers conversationId={conversationId} />
+        )}
       </SearchContext.Provider>
     </ApprovalProvider>
   );
