@@ -1911,7 +1911,6 @@
   "com_ui_stateful_sessions": "Stateful code sessions",
   "com_ui_status_prefix": "Status:",
   "com_ui_steer": "Steer",
-  "com_ui_steer_already_applied": "That steering message already reached the agent, so it was left in the response",
   "com_ui_steer_failed_inline": "Couldn't add to this reply",
   "com_ui_steer_in_flight": "Steering",
   "com_ui_steer_paused_queued": "The assistant is waiting for your review, so your message was queued",
