@@ -434,6 +434,33 @@ export default function useSteering({
     [queueKey],
   );
 
+  /**
+   * Puts the queue back in a remembered order, for a drag the user abandoned.
+   * Ids that have since drained are skipped rather than resurrected, and
+   * anything queued mid-drag keeps its place at the back.
+   */
+  const restoreQueuedOrder = useRecoilCallback(
+    ({ set }) =>
+      (ids: readonly string[]) => {
+        set(store.queuedMessagesByConvoId(queueKey), (prev) => {
+          const byId = new Map(prev.map((item) => [item.id, item]));
+          const restored: QueuedMessage[] = [];
+          for (const id of ids) {
+            const item = byId.get(id);
+            if (item != null) {
+              restored.push(item);
+              byId.delete(id);
+            }
+          }
+          if (restored.length === 0) {
+            return prev;
+          }
+          return [...restored, ...byId.values()];
+        });
+      },
+    [queueKey],
+  );
+
   /** Capture-then-remove, so a refused send can restore the ORIGINAL item. */
   const takeQueued = useRecoilCallback(
     ({ snapshot, set }) =>
@@ -818,13 +845,10 @@ export default function useSteering({
       steerFromComposer,
       queueFromComposer,
       submitSteer,
-      retrySteer,
-      removeSteer,
-      convertSteerToQueue,
-      queueReclaimedSteer,
       enqueue,
       removeQueued,
       reorderQueued,
+      restoreQueuedOrder,
       sendQueuedNow,
       interruptAndSend,
     }),
@@ -841,13 +865,10 @@ export default function useSteering({
       steerFromComposer,
       queueFromComposer,
       submitSteer,
-      retrySteer,
-      removeSteer,
-      convertSteerToQueue,
-      queueReclaimedSteer,
       enqueue,
       removeQueued,
       reorderQueued,
+      restoreQueuedOrder,
       sendQueuedNow,
       interruptAndSend,
     ],

@@ -201,9 +201,3 @@ export const cancelSteerMessage = async (
     params,
   ) as Promise<CancelSteerResponse>;
 };
-
-export function useCancelSteerMutation() {
-  return useMutation({
-    mutationFn: cancelSteerMessage,
-  });
-}
