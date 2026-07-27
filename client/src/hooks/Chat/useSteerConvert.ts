@@ -89,15 +89,21 @@ export default function useSteerConvert() {
           if (fresh.length === 0) {
             return prev;
           }
-          // Merge chronologically — a steer accepted BEFORE the user queued a
-          // later follow-up must drain first — EXCEPT explicit front-inserts
-          // ("Interrupt & send"), whose urgency outranks age.
-          const merged: QueuedMessage[] = [...prev, ...fresh];
-          return merged.sort(
-            (a, b) =>
-              Number(b.priority ?? false) - Number(a.priority ?? false) ||
-              a.createdAt - b.createdAt,
-          );
+          // Each new item is placed chronologically — a steer accepted BEFORE
+          // the user queued a later follow-up must drain first — EXCEPT explicit
+          // front-inserts ("Interrupt & send"), whose urgency outranks age.
+          //
+          // Placed rather than sorted: the queue can be reordered by hand from
+          // the rail, and sorting the whole list would quietly restore the order
+          // the messages were written in, changing which one sends next.
+          const next: QueuedMessage[] = [...prev];
+          for (const item of fresh.sort((a, b) => a.createdAt - b.createdAt)) {
+            const at = next.findIndex(
+              (queued) => queued.priority !== true && queued.createdAt > item.createdAt,
+            );
+            next.splice(at === -1 ? next.length : at, 0, item);
+          }
+          return next;
         });
       },
     [],
