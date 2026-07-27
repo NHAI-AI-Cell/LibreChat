@@ -748,7 +748,13 @@ export default function useSteering({
    *  restore context so a degraded steer requeues/sends with them intact. */
   const sendQueuedNow = useCallback(
     (item: QueuedMessage) => {
-      const taken = takeQueued(item.id) ?? item;
+      /* No fallback to the captured item: the only way it is missing is that
+         something else already took it — the run-end drain, moments before this
+         click landed — and re-sending it would send the same words twice. */
+      const taken = takeQueued(item.id);
+      if (taken == null) {
+        return;
+      }
       if (duringRunActive && canSteer) {
         submitSteer(taken.text, taken.files, {
           quotes: taken.quotes,

@@ -427,19 +427,61 @@ const ChatForm = memo(function ChatForm({
   /** One button slot while a run is generating: with composer text the send
    *  button takes over (Enter steers/queues; hover reveals all actions);
    *  clearing the text restores Stop. */
-  const duringRunSlot =
-    steering.duringRunActive && (textValue?.trim() ?? '') !== '' ? (
-      <DuringRunSendButton
-        ref={submitButtonRef}
-        control={methods.control}
-        steering={steering}
-        getText={() => methods.getValues('text')}
-        onConsumed={() => methods.reset()}
-        disabled={filesLoading}
-      />
-    ) : (
-      <StopButton stop={handleStopGenerating} setShowStopButton={setShowStopButton} />
-    );
+  const duringRunSlot = useMemo(
+    () =>
+      steering.duringRunActive && (textValue?.trim() ?? '') !== '' ? (
+        <DuringRunSendButton
+          ref={submitButtonRef}
+          control={methods.control}
+          steering={steering}
+          getText={() => methods.getValues('text')}
+          onConsumed={() => methods.reset()}
+          disabled={filesLoading}
+        />
+      ) : (
+        <StopButton stop={handleStopGenerating} setShowStopButton={setShowStopButton} />
+      ),
+    [
+      steering,
+      textValue,
+      methods,
+      submitButtonRef,
+      filesLoading,
+      handleStopGenerating,
+      setShowStopButton,
+    ],
+  );
+
+  /* Memoized for `memo(Bar)`: an inline element is a new identity every render,
+     and this component re-renders on every keystroke. */
+  const actionSlot = useMemo(
+    () =>
+      isSubmitting && showStopButton && !answerMode.active
+        ? duringRunSlot
+        : endpoint && (
+            <SendButton
+              ref={submitButtonRef}
+              control={methods.control}
+              disabled={
+                filesLoading ||
+                disableInputs ||
+                isNotAppendable ||
+                (isSubmitting && !answerMode.active)
+              }
+            />
+          ),
+    [
+      endpoint,
+      duringRunSlot,
+      filesLoading,
+      disableInputs,
+      isNotAppendable,
+      isSubmitting,
+      showStopButton,
+      answerMode.active,
+      methods.control,
+    ],
+  );
 
   /* The empty-conversation screen. Drives both how far the composer floats off
      the bottom and whether the ambient tips under it are worth their row. */
@@ -653,22 +695,7 @@ const ChatForm = memo(function ChatForm({
                   showSpeech={SpeechToText}
                   speechDisabled={disableInputs || isNotAppendable}
                   dictation={dictation}
-                  actionSlot={
-                    isSubmitting && showStopButton && !answerMode.active
-                      ? duringRunSlot
-                      : endpoint && (
-                          <SendButton
-                            ref={submitButtonRef}
-                            control={methods.control}
-                            disabled={
-                              filesLoading ||
-                              disableInputs ||
-                              isNotAppendable ||
-                              (isSubmitting && !answerMode.active)
-                            }
-                          />
-                        )
-                  }
+                  actionSlot={actionSlot}
                 />
                 <ToolDialogs />
               </BadgeRowProvider>

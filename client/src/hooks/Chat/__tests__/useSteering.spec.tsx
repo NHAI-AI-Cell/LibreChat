@@ -3,6 +3,7 @@ import { act, renderHook } from '@testing-library/react';
 import { RecoilRoot, useRecoilValue, useSetRecoilState, type MutableSnapshot } from 'recoil';
 import { Constants, ContentTypes, EModelEndpoint, LocalStorageKeys } from 'librechat-data-provider';
 import type { TConversation, TMessage } from 'librechat-data-provider';
+import type { QueuedMessage } from '~/store/families';
 import useSteering from '../useSteering';
 import store from '~/store';
 
@@ -57,6 +58,19 @@ function setup(params: HookParams = {}, initialize?: (snapshot: MutableSnapshot)
 
 function useQueue(convoId: string) {
   return useRecoilValue(store.queuedMessagesByConvoId(convoId));
+}
+
+/** Puts a message in the queue and then sends it, which is the only order the
+ *  rail can produce: Send now is offered for a message the queue is holding. */
+function sendFromQueue(
+  current: {
+    steering: ReturnType<typeof useSteering>;
+    setQueue: (items: QueuedMessage[]) => void;
+  },
+  item: QueuedMessage,
+) {
+  current.setQueue([item]);
+  current.steering.sendQueuedNow(item);
 }
 
 describe('useSteering', () => {
@@ -456,6 +470,7 @@ describe('useSteering', () => {
             ...params,
           }),
           queue: useQueue(CONVO_ID),
+          setQueue: useSetRecoilState(store.queuedMessagesByConvoId(CONVO_ID)),
         }),
         { wrapper },
       );
@@ -499,10 +514,26 @@ describe('useSteering', () => {
       expect(mockMutate).not.toHaveBeenCalled();
     });
 
+    /* The drain can take the head between the click dispatching and the row
+       unmounting. Falling back to the captured item sent the same words twice. */
+    it('refuses to send a message the queue no longer holds', () => {
+      const { result, sendNow } = setupWithFiles({ isSubmitting: false });
+      act(() => {
+        result.current.steering.sendQueuedNow({
+          id: 'already-drained',
+          text: 'sent moments ago',
+          createdAt: Date.now(),
+        });
+      });
+      expect(sendNow).not.toHaveBeenCalled();
+      expect(mockMutate).not.toHaveBeenCalled();
+      expect(result.current.queue).toEqual([]);
+    });
+
     it('steers a queued media item with its own files during a live run', () => {
       const { result, sendNow } = setupWithFiles();
       act(() => {
-        result.current.steering.sendQueuedNow({
+        sendFromQueue(result.current, {
           id: 'q-media',
           text: 'media message',
           createdAt: Date.now(),
@@ -520,7 +551,7 @@ describe('useSteering', () => {
     it('sends a media item as a normal turn with its own files when idle', () => {
       const { result, sendNow } = setupWithFiles({ isSubmitting: false });
       act(() => {
-        result.current.steering.sendQueuedNow({
+        sendFromQueue(result.current, {
           id: 'q-media',
           text: 'media message',
           createdAt: Date.now(),
@@ -584,7 +615,7 @@ describe('useSteering', () => {
       ];
       const { result } = setupWithFiles();
       act(() => {
-        result.current.steering.sendQueuedNow({
+        sendFromQueue(result.current, {
           id: 'q-requeue',
           text: 'requeued media',
           createdAt: Date.now(),
@@ -621,6 +652,7 @@ describe('useSteering', () => {
             ...params,
           }),
           queue: useQueue(CONVO_ID),
+          setQueue: useSetRecoilState(store.queuedMessagesByConvoId(CONVO_ID)),
           chips: useRecoilValue(store.pendingSteersByConvoId(CONVO_ID)),
           pendingQuotes: useRecoilValue(store.pendingQuotesByConvoId(CONVO_ID)),
           pendingSkills: useRecoilValue(store.pendingManualSkillsByConvoId(CONVO_ID)),
@@ -694,7 +726,7 @@ describe('useSteering', () => {
     it('sendQueuedNow passes the carried context to sendNow when idle', () => {
       const { result, sendNow } = setupWithContext({ isSubmitting: false });
       act(() => {
-        result.current.steering.sendQueuedNow({
+        sendFromQueue(result.current, {
           id: 'q-ctx',
           text: 'context send',
           createdAt: Date.now(),
@@ -716,7 +748,7 @@ describe('useSteering', () => {
       });
       const { result } = setupWithContext();
       act(() => {
-        result.current.steering.sendQueuedNow({
+        sendFromQueue(result.current, {
           id: 'q-degraded',
           text: 'carried context',
           createdAt: Date.now(),
