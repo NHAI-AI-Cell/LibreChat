@@ -4,6 +4,7 @@ import type {
   TMessageContentParts,
   SearchResultData,
   TAttachment,
+  TMessage,
   Agents,
 } from 'librechat-data-provider';
 import type { ToolCallGroupExpansionState } from './ToolCallGroup';
@@ -16,6 +17,7 @@ import ApprovalProvider from './ApprovalContext';
 import MemoryArtifacts from './MemoryArtifacts';
 import ToolCallGroup from './ToolCallGroup';
 import Container from './Container';
+import Files from './Files';
 import Part from './Part';
 
 const getToolCallId = (part: TMessageContentParts): string =>
@@ -119,6 +121,15 @@ type ContentPartsProps = {
   isLast: boolean;
   isSubmitting: boolean;
   isLatestMessage?: boolean;
+  /**
+   * The message's own attachments. Images among them already render as
+   * `image_file` parts, so only the rest are shown here — but the rest have
+   * no content part at all, and `Container` (the only other consumer of this
+   * field) is never reached by a message that has content. Without this, an
+   * assistant turn that carries both reasoning and a generated file renders
+   * the reasoning and silently drops the file.
+   */
+  files?: TMessage['files'];
   edit?: boolean;
   enterEdit?: (cancel?: boolean) => void | null | undefined;
   siblingIdx?: number;
@@ -136,6 +147,7 @@ type ContentPartsProps = {
  */
 const ContentParts = memo(function ContentParts({
   edit,
+  files,
   isLast,
   content,
   manualSkills,
@@ -152,6 +164,10 @@ const ContentParts = memo(function ContentParts({
   createdAt,
 }: ContentPartsProps) {
   const attachmentMap = useMemo(() => mapAttachments(attachments ?? []), [attachments]);
+  const nonImageFiles = useMemo(
+    () => files?.filter((file) => file.type?.startsWith('image/') !== true),
+    [files],
+  );
   const effectiveIsSubmitting = isLatestMessage ? isSubmitting : false;
   const toolGroupExpansionRef = useRef(new Map<string, ToolCallGroupExpansionState>());
   const fallbackScopeRef = useRef({ messageId, scope: 0 });
@@ -407,6 +423,11 @@ const ContentParts = memo(function ContentParts({
     <ApprovalProvider>
       <SearchContext.Provider value={{ searchResults }}>
         <MemoryArtifacts attachments={attachments} />
+        {nonImageFiles != null && nonImageFiles.length > 0 && (
+          <Container>
+            <Files files={nonImageFiles} />
+          </Container>
+        )}
         {renderPendingSkills()}
         {showEmptyCursor && (
           <Container>

@@ -195,6 +195,7 @@ const ContentRender = memo(function ContentRender({
             <ContentParts
               edit={edit}
               isLast={isLast}
+              files={msg.files}
               enterEdit={enterEdit}
               siblingIdx={siblingIdx}
               messageId={msg.messageId}

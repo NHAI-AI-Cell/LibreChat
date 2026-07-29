@@ -146,6 +146,7 @@ function MessageParts(props: TMessageProps) {
                   <ContentParts
                     edit={edit}
                     isLast={isLast}
+                    files={message.files}
                     enterEdit={enterEdit}
                     siblingIdx={siblingIdx}
                     attachments={attachments}
