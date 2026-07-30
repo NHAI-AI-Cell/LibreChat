@@ -777,6 +777,23 @@ endpoints:
 #     YourCustomEndpointName:
 #       fileLimit: 2
 #       fileSizeLimit: 5
+#     automaticEndpoint:
+#       # supportedMimeTypes controls admission before routing is considered.
+#       supportedMimeTypes:
+#         - ".*"
+#       routing:
+#         # "manual" is the default. "auto" makes the server choose destinations.
+#         mode: "auto"
+#         # Destination lists contain regular expressions matched against MIME types.
+#         providerMimeTypes:
+#           - "^application/pdf$"
+#           - "^image/(jpeg|png|webp)$"
+#         codeMimeTypes:
+#           - "^application/pdf$"
+#           - "^text/csv$"
+#           - "^application/vnd\\.openxmlformats-officedocument\\.spreadsheetml\\.sheet$"
+#       # Matching both lists sends the file to the provider and makes it available
+#       # to code. Matching only codeMimeTypes omits the file bytes from the provider.
 #   serverFileSizeLimit: 100  # Global server file size limit in MB
 #   avatarSizeLimit: 2  # Limit for user avatar image size in MB
 #   imageGeneration: # Image Gen settings, either percentage or px
