@@ -1763,6 +1763,87 @@ describe('Code Process', () => {
       return { handleFileUpload, getDownloadStream };
     }
 
+    it('hydrates a durable file that has no initial codeEnvRef and persists the new ref', async () => {
+      const dbFile = {
+        file_id: 'degraded-file-id',
+        filename: 'traffic.xlsx',
+        filepath: '/uploads/traffic.xlsx',
+        source: 'local',
+        context: FileContext.message_attachment,
+      };
+      getFiles.mockResolvedValue([]);
+      const { handleFileUpload, getDownloadStream } = setupReuploadMocks({
+        storage_session_id: 'RECOVERED_SESSION',
+        file_id: 'RECOVERED_ID',
+      });
+
+      const result = await primeFiles({
+        req: { user: { id: 'user-123', role: 'USER' } },
+        tool_resources: {
+          execute_code: { file_ids: [], files: [dbFile] },
+        },
+        agentId: 'agent-id',
+      });
+
+      expect(getDownloadStream).toHaveBeenCalledWith(
+        expect.objectContaining({ user: { id: 'user-123', role: 'USER' } }),
+        '/uploads/traffic.xlsx',
+      );
+      expect(handleFileUpload).toHaveBeenCalledWith(
+        expect.objectContaining({
+          filename: 'traffic.xlsx',
+          kind: 'user',
+          id: 'user-123',
+        }),
+      );
+      expect(updateFile).toHaveBeenCalledWith({
+        file_id: 'degraded-file-id',
+        metadata: {
+          codeEnvRef: {
+            kind: 'user',
+            id: 'user-123',
+            storage_session_id: 'RECOVERED_SESSION',
+            file_id: 'RECOVERED_ID',
+          },
+        },
+      });
+      expect(result.files).toEqual([
+        {
+          id: 'RECOVERED_ID',
+          resource_id: 'user-123',
+          storage_session_id: 'RECOVERED_SESSION',
+          name: 'traffic.xlsx',
+          kind: 'user',
+        },
+      ]);
+    });
+
+    it('rejects priming when a required durable file cannot be hydrated', async () => {
+      const dbFile = {
+        file_id: 'degraded-file-id',
+        filename: 'traffic.xlsx',
+        filepath: '/uploads/traffic.xlsx',
+        source: 'local',
+        context: FileContext.message_attachment,
+      };
+      getFiles.mockResolvedValue([]);
+      const getDownloadStream = jest.fn().mockRejectedValue(new Error('storage unavailable'));
+      getStrategyFunctions.mockImplementation((source) =>
+        source === 'execute_code' ? { handleFileUpload: jest.fn() } : { getDownloadStream },
+      );
+      filterFilesByAgentAccess.mockImplementation(({ files }) => Promise.resolve(files));
+
+      await expect(
+        primeFiles({
+          req: { user: { id: 'user-123', role: 'USER' } },
+          tool_resources: {
+            execute_code: { file_ids: [], files: [dbFile] },
+          },
+          agentId: 'agent-id',
+        }),
+      ).rejects.toThrow('Unable to hydrate 1 code file');
+    });
+
     it('seed receives FRESH (storage_session_id, file_id) from the reupload response', async () => {
       const dbFile = {
         file_id: 'librechat-file-id',

@@ -46,7 +46,11 @@ export function createFileMethods(mongoose: typeof import('mongoose')): {
     threadFileIds?: string[],
     ownerScope?: FileOwnerScope,
   ) => Promise<IMongoFile[]>;
-  getUserCodeFiles: (fileIds: string[], ownerScope: FileOwnerScope) => Promise<IMongoFile[]>;
+  getUserCodeFiles: (
+    fileIds: string[],
+    ownerScope: FileOwnerScope,
+    options?: { includeUnregistered?: boolean },
+  ) => Promise<IMongoFile[]>;
   claimCodeFile: (data: {
     filename: string;
     conversationId: string;
@@ -269,6 +273,7 @@ export function createFileMethods(mongoose: typeof import('mongoose')): {
   async function getUserCodeFiles(
     fileIds: string[],
     ownerScope: FileOwnerScope,
+    options?: { includeUnregistered?: boolean },
   ): Promise<IMongoFile[]> {
     if (!fileIds || fileIds.length === 0) {
       return [];
@@ -279,7 +284,7 @@ export function createFileMethods(mongoose: typeof import('mongoose')): {
         {
           file_id: { $in: fileIds },
           context: { $ne: FileContext.execute_code },
-          'metadata.codeEnvRef': { $exists: true },
+          ...(options?.includeUnregistered ? {} : { 'metadata.codeEnvRef': { $exists: true } }),
         },
         ownerScope,
       );

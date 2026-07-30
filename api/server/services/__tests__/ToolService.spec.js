@@ -103,6 +103,7 @@ const {
 } = require('../ToolService');
 const { reinitMCPServer } = require('~/server/services/Tools/mcp');
 const { PENDING_STALE_MS } = require('@librechat/api');
+const { primeFiles: mockPrimeCodeFiles } = require('~/server/services/Files/Code/process');
 
 function createMockReq(capabilities) {
   return {
@@ -215,6 +216,30 @@ describe('ToolService - Action Capability Gating', () => {
   describe('loadAgentTools (definitionsOnly=true) — action tool filtering', () => {
     const actionToolName = `get_weather${actionDelimiter}api_example_com`;
     const regularTool = 'calculator';
+
+    it('fails tool initialization when required code files cannot be hydrated', async () => {
+      const capabilities = [AgentCapabilities.tools, AgentCapabilities.execute_code];
+      const req = createMockReq(capabilities);
+      mockGetEndpointsConfig.mockResolvedValue(createEndpointsConfig(capabilities));
+      mockPrimeCodeFiles.mockRejectedValueOnce(new Error('Unable to hydrate 1 code file'));
+
+      await expect(
+        loadAgentTools({
+          req,
+          res: {},
+          agent: {
+            id: 'agent_123',
+            tools: [Tools.execute_code],
+          },
+          tool_resources: {
+            [Tools.execute_code]: {
+              files: [{ file_id: 'degraded-file', filename: 'traffic.xlsx' }],
+            },
+          },
+          definitionsOnly: true,
+        }),
+      ).rejects.toThrow('Unable to hydrate 1 code file');
+    });
 
     it('should exclude action tools from definitions when actions capability is disabled', async () => {
       const capabilities = [AgentCapabilities.tools, AgentCapabilities.web_search];

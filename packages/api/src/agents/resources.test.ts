@@ -149,6 +149,73 @@ describe('primeResources', () => {
       expect(result.tool_resources?.[EToolResources.execute_code]?.files).toEqual(mockFiles);
     });
 
+    it('categorizes an auto-routed code file without codeEnvRef for durable hydration', async () => {
+      const spreadsheet: TFile = {
+        user: 'user1',
+        file_id: 'file1',
+        filename: 'traffic.xlsx',
+        filepath: '/uploads/traffic.xlsx',
+        object: 'file',
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        bytes: 512,
+        embedded: false,
+        usage: 0,
+      };
+      mockAppConfig.fileConfig = {
+        endpoints: {
+          google: {
+            supportedMimeTypes: ['.*'],
+            routing: {
+              mode: 'auto',
+              providerMimeTypes: ['^application/pdf$'],
+              codeMimeTypes: ['.*'],
+            },
+          },
+        },
+      };
+
+      const result = await primeResources({
+        req: mockReq,
+        appConfig: mockAppConfig,
+        getFiles: mockGetFiles,
+        requestFileSet,
+        attachments: Promise.resolve([spreadsheet]),
+        tool_resources: {},
+        endpoint: 'google',
+      });
+
+      expect(result.attachments).toEqual([spreadsheet]);
+      expect(result.requestAttachments).toEqual([spreadsheet]);
+      expect(result.tool_resources?.[EToolResources.execute_code]?.files).toEqual([spreadsheet]);
+    });
+
+    it('does not auto-categorize a missing-ref file when routing is manual', async () => {
+      const spreadsheet: TFile = {
+        user: 'user1',
+        file_id: 'file1',
+        filename: 'traffic.xlsx',
+        filepath: '/uploads/traffic.xlsx',
+        object: 'file',
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        bytes: 512,
+        embedded: false,
+        usage: 0,
+      };
+
+      const result = await primeResources({
+        req: mockReq,
+        appConfig: mockAppConfig,
+        getFiles: mockGetFiles,
+        requestFileSet,
+        attachments: Promise.resolve([spreadsheet]),
+        tool_resources: {},
+        endpoint: 'google',
+      });
+
+      expect(result.attachments).toEqual([spreadsheet]);
+      expect(result.tool_resources?.[EToolResources.execute_code]).toBeUndefined();
+    });
+
     it('should process embedded files as file_search resources', async () => {
       const mockFiles: TFile[] = [
         {

@@ -1,5 +1,12 @@
 import { logger } from '@librechat/data-schemas';
-import { EModelEndpoint, EToolResources, AgentCapabilities } from 'librechat-data-provider';
+import {
+  EModelEndpoint,
+  EToolResources,
+  AgentCapabilities,
+  getEndpointFileConfig,
+  mergeFileConfig,
+  resolveFileRouting,
+} from 'librechat-data-provider';
 import type { AgentToolResources, TFile, AgentBaseResource } from 'librechat-data-provider';
 import type { IMongoFile, AppConfig, IUser } from '@librechat/data-schemas';
 import type { FilterQuery, QueryOptions, ProjectionType } from 'mongoose';
@@ -94,13 +101,15 @@ const categorizeFileForToolResources = ({
   tool_resources,
   requestFileSet,
   processedResourceFiles,
+  routeToCode = false,
 }: {
   file: TFile;
   tool_resources: AgentToolResources;
   requestFileSet: Set<string>;
   processedResourceFiles: Set<string>;
+  routeToCode?: boolean;
 }): void => {
-  if (file.metadata?.codeEnvRef) {
+  if (file.metadata?.codeEnvRef || routeToCode) {
     addFileToResource({
       file,
       resourceType: EToolResources.execute_code,
@@ -163,6 +172,8 @@ export const primeResources = async ({
   attachments: _attachments,
   tool_resources: _tool_resources,
   agentId,
+  endpoint,
+  endpointType,
 }: {
   req: ServerRequest & { user?: IUser };
   appConfig?: AppConfig;
@@ -172,6 +183,8 @@ export const primeResources = async ({
   getFiles: TGetFiles;
   filterFiles?: TFilterFilesByAgentAccess;
   agentId?: string;
+  endpoint?: string | null;
+  endpointType?: string | null;
 }): Promise<{
   attachments: Array<TFile | undefined> | undefined;
   requestAttachments: Array<TFile | undefined> | undefined;
@@ -181,6 +194,16 @@ export const primeResources = async ({
   const requestAttachments: Array<TFile> = [];
   const agentContextAttachments: Array<TFile> = [];
   try {
+    const endpointFileConfig = getEndpointFileConfig({
+      fileConfig: mergeFileConfig(appConfig?.fileConfig),
+      endpoint,
+      endpointType,
+    });
+    const routesToCode = (file: TFile): boolean => {
+      const routing = resolveFileRouting(file.type ?? '', endpointFileConfig);
+      return routing.mode === 'auto' && routing.code;
+    };
+
     /**
      * Array to collect all unique files that will be returned as attachments
      * Files are added from OCR results and attachment promises, with duplicates prevented
@@ -282,6 +305,7 @@ export const primeResources = async ({
           tool_resources,
           requestFileSet,
           processedResourceFiles,
+          routeToCode: routesToCode(file),
         });
       }
     }
@@ -309,6 +333,7 @@ export const primeResources = async ({
         tool_resources,
         requestFileSet,
         processedResourceFiles,
+        routeToCode: routesToCode(file),
       });
 
       if (file.file_id && attachmentFileIds.has(file.file_id)) {

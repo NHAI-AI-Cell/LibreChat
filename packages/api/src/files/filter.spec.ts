@@ -3,7 +3,7 @@ import { Providers } from '@librechat/agents';
 import { EModelEndpoint } from 'librechat-data-provider';
 import type { IMongoFile } from '@librechat/data-schemas';
 import type { ServerRequest } from '~/types';
-import { filterFilesByEndpointConfig } from './filter';
+import { filterFilesByEndpointConfig, filterFilesForProvider } from './filter';
 
 describe('filterFilesByEndpointConfig', () => {
   /** Helper to create a mock file */
@@ -1310,4 +1310,116 @@ describe('filterFilesByEndpointConfig', () => {
       expect(result).toEqual([file1, file2, file3]);
     });
   });
+});
+
+describe('filterFilesForProvider', () => {
+  const createFile = (filename: string, type: string, bytes = 1024): IMongoFile =>
+    ({
+      _id: new Types.ObjectId(),
+      user: new Types.ObjectId(),
+      file_id: new Types.ObjectId().toString(),
+      filename,
+      type,
+      bytes,
+      object: 'file',
+      usage: 0,
+      source: 'test',
+      filepath: `/test/${filename}`,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }) as unknown as IMongoFile;
+
+  const createRequest = (
+    overrides: Record<string, unknown> = {},
+    routing: Record<string, unknown> | undefined = {
+      mode: 'auto',
+      providerMimeTypes: ['^application/pdf$'],
+      codeMimeTypes: ['.*'],
+    },
+  ) =>
+    ({
+      config: {
+        fileConfig: {
+          endpoints: {
+            [Providers.GOOGLE]: {
+              supportedMimeTypes: ['.*'],
+              routing,
+              ...overrides,
+            },
+          },
+        },
+      },
+    }) as unknown as ServerRequest;
+
+  it('keeps provider-native PDF and removes code-only XLSX', () => {
+    const pdf = createFile('report.pdf', 'application/pdf');
+    const xlsx = createFile(
+      'traffic.xlsx',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+
+    expect(
+      filterFilesForProvider(createRequest(), {
+        files: [pdf, xlsx],
+        endpoint: Providers.GOOGLE,
+      }),
+    ).toEqual([pdf]);
+  });
+
+  it('preserves both files in manual mode', () => {
+    const pdf = createFile('report.pdf', 'application/pdf');
+    const xlsx = createFile(
+      'traffic.xlsx',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+
+    expect(
+      filterFilesForProvider(createRequest({}, { mode: 'manual' }), {
+        files: [pdf, xlsx],
+        endpoint: Providers.GOOGLE,
+      }),
+    ).toEqual([pdf, xlsx]);
+  });
+
+  it('still applies disabled, individual-size, admission, and total-size rules first', () => {
+    const pdf = createFile('report.pdf', 'application/pdf', 4);
+    const secondPdf = createFile('appendix.pdf', 'application/pdf', 4);
+    const tooLarge = createFile('large.pdf', 'application/pdf', 11);
+    const unadmitted = createFile('notes.txt', 'text/plain', 1);
+
+    expect(
+      filterFilesForProvider(
+        createRequest({
+          supportedMimeTypes: ['^application/pdf$'],
+          fileSizeLimit: 10 / 1024 / 1024,
+          totalSizeLimit: 7 / 1024 / 1024,
+        }),
+        {
+          files: [pdf, secondPdf, tooLarge, unadmitted],
+          endpoint: Providers.GOOGLE,
+        },
+      ),
+    ).toEqual([pdf]);
+
+    expect(
+      filterFilesForProvider(createRequest({ disabled: true }), {
+        files: [pdf],
+        endpoint: Providers.GOOGLE,
+      }),
+    ).toEqual([]);
+  });
+
+  it.each(['application/octet-stream', ''])(
+    'removes %j when it only matches the code destination',
+    (type) => {
+      const file = createFile('opaque.bin', type);
+
+      expect(
+        filterFilesForProvider(createRequest(), {
+          files: [file],
+          endpoint: Providers.GOOGLE,
+        }),
+      ).toEqual([]);
+    },
+  );
 });

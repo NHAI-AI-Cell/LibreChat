@@ -722,6 +722,42 @@ describe('File Methods', () => {
 
       expect(files).toEqual([]);
     });
+
+    it('includes an owner-scoped thread file without codeEnvRef only when recovery is enabled', async () => {
+      const ownerId = new mongoose.Types.ObjectId();
+      const fileId = uuidv4();
+
+      await runAsSystem(() =>
+        fileMethods.createFile({
+          file_id: fileId,
+          user: ownerId,
+          tenantId: 'tenant-a',
+          filename: 'degraded.xlsx',
+          filepath: '/uploads/degraded.xlsx',
+          source: 'local',
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          bytes: 100,
+          context: FileContext.message_attachment,
+        }),
+      );
+
+      const ownerScope = {
+        userId: ownerId.toString(),
+        tenantId: 'tenant-a',
+      };
+
+      await expect(fileMethods.getUserCodeFiles([fileId], ownerScope)).resolves.toEqual([]);
+      await expect(
+        fileMethods.getUserCodeFiles([fileId], ownerScope, {
+          includeUnregistered: true,
+        }),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          file_id: fileId,
+          filename: 'degraded.xlsx',
+        }),
+      ]);
+    });
   });
 
   describe('updateFile', () => {

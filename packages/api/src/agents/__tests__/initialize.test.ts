@@ -90,6 +90,9 @@ jest.mock('~/endpoints', () => ({
 
 jest.mock('~/files', () => ({
   filterFilesByEndpointConfig: jest.fn(() => []),
+  filterFilesForProvider: jest.fn(
+    (_req: unknown, params: { files?: unknown[] }) => params.files ?? [],
+  ),
 }));
 
 jest.mock('~/prompts', () => ({
@@ -838,6 +841,61 @@ describe('initializeAgent — attachment scoping', () => {
     expect(result.attachments).toEqual([agentContextFile, requestFile]);
     expect(result.requestAttachments).toEqual([requestFile]);
     expect(result.agentContextAttachments).toEqual([agentContextFile]);
+  });
+
+  it('filters code-only files after priming while retaining their tool resource', async () => {
+    const { filterFilesForProvider } = jest.requireMock('~/files') as {
+      filterFilesForProvider: jest.Mock;
+    };
+    const { primeResources } = jest.requireMock('../resources') as {
+      primeResources: jest.Mock;
+    };
+    const pdf = {
+      file_id: 'request-pdf',
+      filename: 'report.pdf',
+      type: 'application/pdf',
+    };
+    const xlsx = {
+      file_id: 'request-xlsx',
+      filename: 'traffic.xlsx',
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    };
+    const tool_resources = {
+      [EToolResources.execute_code]: { files: [pdf, xlsx] },
+    };
+    primeResources.mockResolvedValueOnce({
+      attachments: [pdf, xlsx],
+      requestAttachments: [pdf, xlsx],
+      agentContextAttachments: undefined,
+      tool_resources,
+    });
+    filterFilesForProvider.mockImplementation(
+      (_req: unknown, params: { files?: Array<{ type?: string }> }) =>
+        (params.files ?? []).filter((file) => file.type === 'application/pdf'),
+    );
+
+    const { agent, req, res, loadTools, db } = createMocks();
+
+    const result = await initializeAgent(
+      {
+        req,
+        res,
+        agent,
+        loadTools,
+        endpointOption: { endpoint: EModelEndpoint.agents },
+        allowedProviders: new Set([Providers.OPENAI]),
+        isInitialAgent: true,
+      },
+      db,
+    );
+
+    expect(result.attachments).toEqual([pdf]);
+    expect(result.requestAttachments).toEqual([pdf]);
+    expect(result.tool_resources).toBe(tool_resources);
+    expect(filterFilesForProvider).toHaveBeenCalledWith(
+      req,
+      expect.objectContaining({ files: [pdf, xlsx] }),
+    );
   });
 
   it('owner-scopes request file usage updates while preserving trusted tool files', async () => {
@@ -2075,6 +2133,53 @@ describe('initializeAgent — code-generated file thread filter (regression)', (
       userId: 'user-1',
       tenantId: undefined,
     });
+  });
+
+  it('opts into missing-reference thread recovery only for automatic routing', async () => {
+    const { agent, req, res, loadTools, db } = setupExecuteCodeAgent();
+    req.config.fileConfig = {
+      endpoints: {
+        [Providers.OPENAI]: {
+          supportedMimeTypes: ['.*'],
+          routing: {
+            mode: 'auto',
+            providerMimeTypes: ['^application/pdf$'],
+            codeMimeTypes: ['.*'],
+          },
+        },
+      },
+    };
+    mockGetThreadData.mockReturnValue({
+      messageIds: ['msgN'],
+      fileIds: ['degraded-xlsx'],
+    });
+
+    const getUserCodeFiles = jest.fn().mockResolvedValue([]);
+    const getMessages = jest
+      .fn()
+      .mockResolvedValue([{ messageId: 'msgN', parentMessageId: 'msgRoot', files: [] }]);
+
+    await initializeAgent(
+      {
+        req,
+        res,
+        agent,
+        loadTools,
+        endpointOption: { endpoint: EModelEndpoint.agents },
+        conversationId: 'conv-1',
+        parentMessageId: 'msgN',
+        allowedProviders: new Set([Providers.OPENAI]),
+        isInitialAgent: true,
+        codeEnvAvailable: true,
+      },
+      { ...db, getMessages, getUserCodeFiles },
+    );
+
+    expect(getUserCodeFiles).toHaveBeenCalledWith(
+      ['degraded-xlsx'],
+      { userId: 'user-1', tenantId: undefined },
+      { includeUnregistered: true },
+    );
   });
 
   it('selects messages.attachments alongside messages.files (regression)', async () => {

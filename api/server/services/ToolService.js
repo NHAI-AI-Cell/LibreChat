@@ -992,6 +992,7 @@ async function loadToolDefinitionsWrapper({ req, res, agent, streamId = null, to
       }
     } catch (error) {
       logger.error('[loadToolDefinitionsWrapper] Error priming code files:', error);
+      throw error;
     }
   }
 

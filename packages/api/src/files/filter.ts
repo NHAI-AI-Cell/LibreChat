@@ -1,6 +1,17 @@
-import { getEndpointFileConfig, mergeFileConfig, fileConfig } from 'librechat-data-provider';
+import {
+  getEndpointFileConfig,
+  mergeFileConfig,
+  resolveFileRouting,
+  fileConfig,
+} from 'librechat-data-provider';
 import type { IMongoFile } from '@librechat/data-schemas';
 import type { ServerRequest } from '~/types';
+
+export type FileFilterParams = {
+  files: IMongoFile[] | undefined;
+  endpoint?: string | null;
+  endpointType?: string | null;
+};
 
 /**
  * Checks if a MIME type is supported by the endpoint configuration
@@ -30,11 +41,7 @@ function isMimeTypeSupported(mimeType: string, supportedMimeTypes?: RegExp[]): b
  */
 export function filterFilesByEndpointConfig(
   req: ServerRequest,
-  params: {
-    files: IMongoFile[] | undefined;
-    endpoint?: string | null;
-    endpointType?: string | null;
-  },
+  params: FileFilterParams,
 ): IMongoFile[] {
   const { files, endpoint, endpointType } = params;
 
@@ -93,4 +100,27 @@ export function filterFilesByEndpointConfig(
   }
 
   return filteredFiles;
+}
+
+/**
+ * Applies the standard endpoint admission and size limits, then removes
+ * code-only files from the bytes sent to an automatically routed provider.
+ */
+export function filterFilesForProvider(req: ServerRequest, params: FileFilterParams): IMongoFile[] {
+  const admittedFiles = filterFilesByEndpointConfig(req, params);
+  if (admittedFiles.length === 0) {
+    return [];
+  }
+
+  const endpointFileConfig = getEndpointFileConfig({
+    fileConfig: mergeFileConfig(req.config?.fileConfig),
+    endpoint: params.endpoint,
+    endpointType: params.endpointType,
+  });
+
+  if (endpointFileConfig.routing?.mode !== 'auto') {
+    return admittedFiles;
+  }
+
+  return admittedFiles.filter((file) => resolveFileRouting(file.type, endpointFileConfig).provider);
 }

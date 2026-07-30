@@ -10,6 +10,8 @@ import {
   isAgentsEndpoint,
   replaceSpecialVars,
   providerEndpointMap,
+  getEndpointFileConfig,
+  mergeFileConfig,
 } from 'librechat-data-provider';
 import type {
   AgentToolResources,
@@ -50,7 +52,7 @@ import {
   registerFileAuthoringTools,
   isFileAuthoringToolDefinition,
 } from './tools';
-import { filterFilesByEndpointConfig } from '~/files';
+import { filterFilesByEndpointConfig, filterFilesForProvider } from '~/files';
 import { generateArtifactsPrompt } from '~/prompts';
 import { getProviderConfig } from '~/endpoints';
 import { primeResources } from './resources';
@@ -436,7 +438,11 @@ export interface InitializeAgentDbMethods extends EndpointDbMethods {
     ownerScope?: FileOwnerScope,
   ) => Promise<unknown[]>;
   /** Get user-uploaded execute_code files by file IDs (from message.files in thread) */
-  getUserCodeFiles?: (fileIds: string[], ownerScope: FileOwnerScope) => Promise<unknown[]>;
+  getUserCodeFiles?: (
+    fileIds: string[],
+    ownerScope: FileOwnerScope,
+    options?: { includeUnregistered?: boolean },
+  ) => Promise<unknown[]>;
   /** Get messages for a conversation (supports select for field projection) */
   getMessages?: (
     filter: { conversationId: string },
@@ -607,6 +613,14 @@ export async function initializeAgent(
 
   const provider = agent.provider;
   agent.endpoint = provider;
+  const fileEndpoint = agent.endpoint ?? '';
+  const fileEndpointType = !paramEndpoints.has(fileEndpoint) ? EModelEndpoint.custom : undefined;
+  const endpointFileConfig = getEndpointFileConfig({
+    fileConfig: mergeFileConfig(req.config?.fileConfig),
+    endpoint: fileEndpoint,
+    endpointType: fileEndpointType,
+  });
+  const recoverUnregisteredCodeFiles = endpointFileConfig.routing?.mode === 'auto';
 
   /**
    * Load conversation files for ALL agents, not just the initial agent.
@@ -688,6 +702,7 @@ export async function initializeAgent(
         userCodeFiles = (await db.getUserCodeFiles(
           threadFileIds,
           requestFileOwnerScope,
+          ...(recoverUnregisteredCodeFiles ? [{ includeUnregistered: true }] : []),
         )) as IMongoFile[];
       }
     }
@@ -724,21 +739,16 @@ export async function initializeAgent(
   }
 
   if (currentFiles && currentFiles.length) {
-    let endpointType: EModelEndpoint | undefined;
-    if (!paramEndpoints.has(agent.endpoint ?? '')) {
-      endpointType = EModelEndpoint.custom;
-    }
-
     currentFiles = filterFilesByEndpointConfig(req, {
       files: currentFiles,
-      endpoint: agent.endpoint ?? '',
-      endpointType,
+      endpoint: fileEndpoint,
+      endpointType: fileEndpointType,
     });
   }
 
   const {
-    attachments: primedAttachments,
-    requestAttachments: primedRequestAttachments,
+    attachments: allPrimedAttachments,
+    requestAttachments: allPrimedRequestAttachments,
     agentContextAttachments: primedAgentContextAttachments,
     tool_resources,
   } = await primeResources({
@@ -752,6 +762,23 @@ export async function initializeAgent(
       : undefined,
     tool_resources: agent.tool_resources,
     requestFileSet: new Set(requestFiles?.map((file) => file.file_id)),
+    endpoint: fileEndpoint,
+    endpointType: fileEndpointType,
+  });
+
+  const primedAttachments = filterFilesForProvider(req, {
+    files: (allPrimedAttachments ?? []).filter(
+      (file): file is TFile => file != null,
+    ) as unknown as IMongoFile[],
+    endpoint: fileEndpoint,
+    endpointType: fileEndpointType,
+  });
+  const primedRequestAttachments = filterFilesForProvider(req, {
+    files: (allPrimedRequestAttachments ?? []).filter(
+      (file): file is TFile => file != null,
+    ) as unknown as IMongoFile[],
+    endpoint: fileEndpoint,
+    endpointType: fileEndpointType,
   });
 
   /**
