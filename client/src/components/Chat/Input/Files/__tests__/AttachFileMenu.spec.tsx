@@ -388,6 +388,74 @@ describe('AttachFileMenu', () => {
     });
   });
 
+  describe('Automatic Routing', () => {
+    it('shows one unrestricted local action and keeps SharePoint route-neutral', () => {
+      setupMocks({ provider: Providers.GOOGLE });
+      const handleFileChange = jest.fn();
+      mockUseFileHandlingNoChatContext.mockReturnValue({ handleFileChange });
+      mockUseAgentCapabilities.mockReturnValue({
+        contextEnabled: true,
+        fileSearchEnabled: true,
+        codeEnabled: true,
+      });
+      mockUseAgentToolPermissions.mockReturnValue({
+        fileSearchAllowedByAgent: true,
+        codeAllowedByAgent: true,
+        provider: Providers.GOOGLE,
+      });
+      mockUseGetStartupConfig.mockReturnValue({
+        data: { sharePointFilePickerEnabled: true },
+      });
+
+      const originalClick = HTMLInputElement.prototype.click;
+      let acceptAtClick: string | undefined;
+      const file = new File(['data'], 'traffic.xlsx', {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      HTMLInputElement.prototype.click = function click() {
+        acceptAtClick = this.accept;
+        Object.defineProperty(this, 'files', {
+          configurable: true,
+          value: [file],
+        });
+        fireEvent.change(this);
+      };
+
+      try {
+        renderMenu({
+          endpointType: EModelEndpoint.google,
+          endpointFileConfig: {
+            supportedMimeTypes: [/.*/],
+            routing: {
+              mode: 'auto',
+              providerMimeTypes: [/^application\/pdf$/],
+              codeMimeTypes: [/.*/],
+            },
+          },
+        });
+        openMenu();
+
+        expect(screen.getByText('Attach Files')).toBeInTheDocument();
+        expect(screen.queryByText('Upload to Provider')).not.toBeInTheDocument();
+        expect(screen.queryByText('Upload to Code Environment')).not.toBeInTheDocument();
+        expect(screen.queryByText('Upload as Text')).not.toBeInTheDocument();
+        expect(screen.queryByText('Upload for File Search')).not.toBeInTheDocument();
+        expect(screen.getByText('Upload from SharePoint')).toBeInTheDocument();
+
+        fireEvent.click(screen.getByText('Attach Files'));
+      } finally {
+        HTMLInputElement.prototype.click = originalClick;
+      }
+
+      expect(acceptAtClick).toBe('');
+      expect(handleFileChange).toHaveBeenCalledWith(expect.any(Object), undefined);
+      expect(mockUseSharePointFileHandlingNoChatContext).toHaveBeenCalledWith(
+        { toolResource: undefined },
+        expect.any(Object),
+      );
+    });
+  });
+
   describe('SharePoint Integration', () => {
     it('shows SharePoint option when enabled', () => {
       setupMocks();

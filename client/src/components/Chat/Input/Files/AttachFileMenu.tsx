@@ -149,6 +149,32 @@ const AttachFileMenu = ({
       toolResourceRef.current = value;
     };
 
+    if (endpointFileConfig?.routing?.mode === 'auto') {
+      const items: MenuItemProps[] = [
+        {
+          label: localize('com_sidepanel_attach_files'),
+          onClick: () => {
+            setToolResource(undefined);
+            handleUploadClick();
+          },
+          icon: <AttachmentIcon />,
+        },
+      ];
+
+      if (sharePointEnabled) {
+        items.push({
+          label: localize('com_files_upload_sharepoint'),
+          onClick: () => {
+            setToolResource(undefined);
+            setIsSharePointDialogOpen(true);
+          },
+          icon: <SharePointIcon className="icon-md" />,
+        });
+      }
+
+      return items;
+    }
+
     const createMenuItems = (onAction: (fileType?: FileUploadType) => void) => {
       const items: MenuItemProps[] = [];
 
@@ -271,6 +297,7 @@ const AttachFileMenu = ({
     codeAllowedByAgent,
     fileSearchAllowedByAgent,
     setIsSharePointDialogOpen,
+    endpointFileConfig?.routing?.mode,
   ]);
 
   const menuTrigger = (
