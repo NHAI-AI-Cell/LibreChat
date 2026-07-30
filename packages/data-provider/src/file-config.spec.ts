@@ -11,6 +11,8 @@ import {
   mergeFileConfig,
   inferMimeType,
   textMimeTypes,
+  fileConfigSchema,
+  resolveFileRouting,
 } from './file-config';
 import { EModelEndpoint } from './schemas';
 
@@ -1340,5 +1342,161 @@ describe('isPermissiveMimeConfig', () => {
   it('returns true for regex produced by convertStringsToRegex with .*', () => {
     const converted = convertStringsToRegex(['.*']);
     expect(isPermissiveMimeConfig(converted)).toBe(true);
+  });
+});
+
+describe('automatic file routing', () => {
+  const routingInput = {
+    mode: 'auto' as const,
+    providerMimeTypes: ['^application/pdf$'],
+    codeMimeTypes: ['.*'],
+  };
+
+  it('accepts the routing configuration schema and rejects unknown modes', () => {
+    expect(
+      fileConfigSchema.safeParse({
+        endpoints: {
+          google: {
+            supportedMimeTypes: ['.*'],
+            routing: routingInput,
+          },
+        },
+      }).success,
+    ).toBe(true);
+
+    expect(
+      fileConfigSchema.safeParse({
+        endpoints: {
+          google: {
+            routing: {
+              ...routingInput,
+              mode: 'guess',
+            },
+          },
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('routes provider-native files to both provider and code', () => {
+    const merged = mergeFileConfig({
+      endpoints: {
+        google: {
+          supportedMimeTypes: ['.*'],
+          routing: routingInput,
+        },
+      },
+    });
+    const endpoint = getEndpointFileConfig({
+      fileConfig: merged,
+      endpoint: EModelEndpoint.google,
+    });
+
+    expect(resolveFileRouting('application/pdf', endpoint)).toEqual({
+      mode: 'auto',
+      accepted: true,
+      provider: true,
+      code: true,
+    });
+  });
+
+  it.each([
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/octet-stream',
+    '',
+  ])('routes %p to code only', (mimeType) => {
+    const merged = mergeFileConfig({
+      endpoints: {
+        google: {
+          supportedMimeTypes: ['.*'],
+          routing: routingInput,
+        },
+      },
+    });
+    const endpoint = getEndpointFileConfig({
+      fileConfig: merged,
+      endpoint: EModelEndpoint.google,
+    });
+
+    expect(resolveFileRouting(mimeType, endpoint)).toEqual({
+      mode: 'auto',
+      accepted: true,
+      provider: false,
+      code: true,
+    });
+  });
+
+  it('fails closed when neither route accepts the MIME type', () => {
+    expect(
+      resolveFileRouting('application/x-denied', {
+        routing: {
+          mode: 'auto',
+          providerMimeTypes: [],
+          codeMimeTypes: [/^text\//],
+        },
+      }),
+    ).toEqual({
+      mode: 'auto',
+      accepted: false,
+      provider: false,
+      code: false,
+    });
+  });
+
+  it('preserves manual compatibility when routing is absent', () => {
+    expect(resolveFileRouting('application/pdf', {})).toEqual({
+      mode: 'manual',
+      accepted: true,
+      provider: true,
+      code: false,
+    });
+  });
+
+  it('inherits routing fields from default and overrides them individually', () => {
+    const merged = mergeFileConfig({
+      endpoints: {
+        default: {
+          routing: {
+            mode: 'auto',
+            providerMimeTypes: ['^application/pdf$'],
+            codeMimeTypes: ['^application/'],
+          },
+        },
+        google: {
+          routing: {
+            codeMimeTypes: ['.*'],
+          },
+        },
+      },
+    });
+    const endpoint = getEndpointFileConfig({
+      fileConfig: merged,
+      endpoint: EModelEndpoint.google,
+    });
+
+    expect(endpoint.routing?.mode).toBe('auto');
+    expect(endpoint.routing?.providerMimeTypes?.[0].test('application/pdf')).toBe(true);
+    expect(endpoint.routing?.codeMimeTypes?.[0].test('')).toBe(true);
+  });
+
+  it('skips invalid routing regex strings without discarding valid patterns', () => {
+    const merged = mergeFileConfig({
+      endpoints: {
+        google: {
+          routing: {
+            mode: 'auto',
+            providerMimeTypes: ['[', '^application/pdf$'],
+            codeMimeTypes: ['.*'],
+          },
+        },
+      },
+    });
+    const endpoint = getEndpointFileConfig({
+      fileConfig: merged,
+      endpoint: EModelEndpoint.google,
+    });
+
+    expect(endpoint.routing?.providerMimeTypes).toHaveLength(1);
+    expect(endpoint.routing?.providerMimeTypes?.[0].test('application/pdf')).toBe(true);
   });
 });

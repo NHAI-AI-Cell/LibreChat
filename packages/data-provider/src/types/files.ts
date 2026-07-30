@@ -39,12 +39,21 @@ export enum FileContext {
   bytes = 'bytes',
 }
 
+export type FileRoutingMode = 'manual' | 'auto';
+
+export type EndpointFileRouting = {
+  mode?: FileRoutingMode;
+  providerMimeTypes?: RegExp[];
+  codeMimeTypes?: RegExp[];
+};
+
 export type EndpointFileConfig = {
   disabled?: boolean;
   fileLimit?: number;
   fileSizeLimit?: number;
   totalSizeLimit?: number;
   supportedMimeTypes?: RegExp[];
+  routing?: EndpointFileRouting;
 };
 
 export type FileConfig = {

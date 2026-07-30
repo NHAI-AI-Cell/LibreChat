@@ -458,12 +458,19 @@ export const fileConfig = {
 
 const supportedMimeTypesSchema = z.array(z.string()).optional();
 
+const endpointFileRoutingSchema = z.object({
+  mode: z.enum(['manual', 'auto']).optional(),
+  providerMimeTypes: supportedMimeTypesSchema.optional(),
+  codeMimeTypes: supportedMimeTypesSchema.optional(),
+});
+
 export const endpointFileConfigSchema = z.object({
   disabled: z.boolean().optional(),
   fileLimit: z.number().min(0).optional(),
   fileSizeLimit: z.number().min(0).optional(),
   totalSizeLimit: z.number().min(0).optional(),
   supportedMimeTypes: supportedMimeTypesSchema.optional(),
+  routing: endpointFileRoutingSchema.optional(),
 });
 
 const skillFileConfigSchema = z.object({
@@ -524,6 +531,42 @@ export const isPermissiveMimeConfig = (types?: RegExp[]): boolean => {
   return types.some((regex) => regex.test('x-librechat/x-probe'));
 };
 
+export type ResolvedFileRouting = {
+  mode: 'manual' | 'auto';
+  accepted: boolean;
+  provider: boolean;
+  code: boolean;
+};
+
+/**
+ * Resolves an admitted file into provider and code destinations.
+ * Manual mode preserves the historical provider attachment behavior.
+ */
+export const resolveFileRouting = (
+  mimeType: string,
+  endpointConfig: EndpointFileConfig,
+): ResolvedFileRouting => {
+  const routing = endpointConfig.routing;
+  if (routing?.mode !== 'auto') {
+    return {
+      mode: 'manual',
+      accepted: true,
+      provider: true,
+      code: false,
+    };
+  }
+
+  const provider = fileConfig.checkType(mimeType, routing.providerMimeTypes ?? []);
+  const code = fileConfig.checkType(mimeType, routing.codeMimeTypes ?? []);
+
+  return {
+    mode: 'auto',
+    accepted: provider || code,
+    provider,
+    code,
+  };
+};
+
 /**
  * Gets the appropriate endpoint file configuration with standardized lookup logic.
  *
@@ -546,6 +589,18 @@ function mergeWithDefault(
   const defaultMimeTypes = isDocumentSupportedProvider(endpoint)
     ? supportedMimeTypes
     : defaultConfig.supportedMimeTypes;
+  const routing =
+    endpointConfig.routing != null || defaultConfig.routing != null
+      ? {
+          ...defaultConfig.routing,
+          ...endpointConfig.routing,
+          providerMimeTypes:
+            endpointConfig.routing?.providerMimeTypes ??
+            defaultConfig.routing?.providerMimeTypes,
+          codeMimeTypes:
+            endpointConfig.routing?.codeMimeTypes ?? defaultConfig.routing?.codeMimeTypes,
+        }
+      : undefined;
 
   return {
     disabled: endpointConfig.disabled ?? defaultConfig.disabled,
@@ -553,6 +608,7 @@ function mergeWithDefault(
     fileSizeLimit: endpointConfig.fileSizeLimit ?? defaultConfig.fileSizeLimit,
     totalSizeLimit: endpointConfig.totalSizeLimit ?? defaultConfig.totalSizeLimit,
     supportedMimeTypes: endpointConfig.supportedMimeTypes ?? defaultMimeTypes,
+    routing,
   };
 }
 
@@ -781,6 +837,24 @@ export function mergeFileConfig(dynamic: z.infer<typeof fileConfigSchema> | unde
       mergedEndpoint.supportedMimeTypes = convertStringsToRegex(
         dynamicEndpoint.supportedMimeTypes as unknown as string[],
       );
+    }
+
+    if (dynamicEndpoint.routing) {
+      const { providerMimeTypes, codeMimeTypes, ...routingRest } = dynamicEndpoint.routing;
+      mergedEndpoint.routing = {
+        ...mergedEndpoint.routing,
+        ...routingRest,
+      };
+      if (providerMimeTypes) {
+        mergedEndpoint.routing.providerMimeTypes = convertStringsToRegex(
+          providerMimeTypes as unknown as string[],
+        );
+      }
+      if (codeMimeTypes) {
+        mergedEndpoint.routing.codeMimeTypes = convertStringsToRegex(
+          codeMimeTypes as unknown as string[],
+        );
+      }
     }
   }
 
