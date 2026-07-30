@@ -257,6 +257,13 @@ export const codeTypeMapping: { [key: string]: string } = {
   log: 'text/plain', // .log - Log file
   csv: 'text/csv', // .csv - Comma-separated values
   tsv: 'text/tab-separated-values', // .tsv - Tab-separated values
+  xls: 'application/vnd.ms-excel', // .xls - Microsoft Excel
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx - Microsoft Excel
+  doc: 'application/msword', // .doc - Microsoft Word
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx - Microsoft Word
+  ppt: 'application/vnd.ms-powerpoint', // .ppt - Microsoft PowerPoint
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', // .pptx - Microsoft PowerPoint
+  pdf: 'application/pdf', // .pdf - Portable Document Format
   parquet: 'application/x-parquet', // .parquet - Apache Parquet columnar storage
   json: 'application/json', // .json - JSON file
   xml: 'application/xml', // .xml - XML file
@@ -595,8 +602,7 @@ function mergeWithDefault(
           ...defaultConfig.routing,
           ...endpointConfig.routing,
           providerMimeTypes:
-            endpointConfig.routing?.providerMimeTypes ??
-            defaultConfig.routing?.providerMimeTypes,
+            endpointConfig.routing?.providerMimeTypes ?? defaultConfig.routing?.providerMimeTypes,
           codeMimeTypes:
             endpointConfig.routing?.codeMimeTypes ?? defaultConfig.routing?.codeMimeTypes,
         }

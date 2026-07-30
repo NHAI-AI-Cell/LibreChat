@@ -300,6 +300,113 @@ describe('Multer Configuration', () => {
       fileFilter(mockReq, zipFile, cb);
     });
 
+    describe('automatic file routing', () => {
+      const createAutoFileFilter = ({ providerMimeTypes, codeMimeTypes }) => {
+        const { mergeFileConfig } = require('librechat-data-provider');
+        return createFileFilter(
+          mergeFileConfig({
+            endpoints: {
+              google: {
+                supportedMimeTypes: ['.*'],
+                routing: {
+                  mode: 'auto',
+                  providerMimeTypes,
+                  codeMimeTypes,
+                },
+              },
+            },
+          }),
+        );
+      };
+
+      beforeEach(() => {
+        mockReq.body.endpoint = 'google';
+      });
+
+      it('accepts a PDF routed natively to the provider', (done) => {
+        const fileFilter = createAutoFileFilter({
+          providerMimeTypes: ['^application/pdf$'],
+          codeMimeTypes: [],
+        });
+        const pdfFile = {
+          ...mockFile,
+          originalname: 'report.pdf',
+          mimetype: 'application/pdf',
+        };
+
+        fileFilter(mockReq, pdfFile, (err, result) => {
+          expect(err).toBeNull();
+          expect(result).toBe(true);
+          done();
+        });
+      });
+
+      it('infers and accepts an XLSX routed to code when the browser omits its MIME type', (done) => {
+        const fileFilter = createAutoFileFilter({
+          providerMimeTypes: ['^application/pdf$'],
+          codeMimeTypes: [
+            '^application/vnd\\.openxmlformats-officedocument\\.spreadsheetml\\.sheet$',
+          ],
+        });
+        const spreadsheet = {
+          ...mockFile,
+          originalname: 'traffic-data.xlsx',
+          mimetype: '',
+        };
+
+        fileFilter(mockReq, spreadsheet, (err, result) => {
+          expect(err).toBeNull();
+          expect(result).toBe(true);
+          expect(spreadsheet.mimetype).toBe(
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          );
+          done();
+        });
+      });
+
+      it('rejects an admitted file when neither automatic destination supports it', (done) => {
+        const fileFilter = createAutoFileFilter({
+          providerMimeTypes: ['^application/pdf$'],
+          codeMimeTypes: ['^text/csv$'],
+        });
+        const archive = {
+          ...mockFile,
+          originalname: 'payload.zip',
+          mimetype: 'application/zip',
+        };
+
+        fileFilter(mockReq, archive, (err, result) => {
+          expect(err).toEqual(new Error('Unsupported file type: application/zip'));
+          expect(result).toBe(false);
+          done();
+        });
+      });
+
+      it('preserves supportedMimeTypes-only behavior when routing is manual', (done) => {
+        const { mergeFileConfig } = require('librechat-data-provider');
+        const fileFilter = createFileFilter(
+          mergeFileConfig({
+            endpoints: {
+              google: {
+                supportedMimeTypes: ['^application/zip$'],
+              },
+            },
+          }),
+        );
+        const archive = {
+          ...mockFile,
+          originalname: 'payload.zip',
+          mimetype: 'application/zip',
+        };
+
+        fileFilter(mockReq, archive, (err, result) => {
+          expect(err).toBeNull();
+          expect(result).toBe(true);
+          done();
+        });
+      });
+    });
+
     it('should use real mergeFileConfig function', async () => {
       const { mergeFileConfig, mbToBytes } = require('librechat-data-provider');
 

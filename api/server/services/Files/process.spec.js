@@ -621,14 +621,283 @@ describe('processAgentFileUpload', () => {
     });
   });
 
-  /* Phase C / option α regression: the upload must persist its sandbox
-   * pointer under `metadata.codeEnvRef` (the post-cutover schema). The
-   * legacy `metadata.fileIdentifier` key is silently stripped by mongoose
-   * strict mode and downstream readers (`primeFiles`, `getCodeFilesByIds`,
-   * `categorizeFileForToolResources`, controller filtering) only check
-   * `codeEnvRef`. Storing under the legacy key would orphan the file —
-   * priming would skip it on subsequent code-execution turns and the
-   * sandbox copy would never re-mount. */
+  describe('automatic message attachment routing', () => {
+    const fs = require('fs');
+    const { Readable } = require('stream');
+    let createReadStreamSpy;
+
+    const configureAutoRouting = ({
+      providerMimeTypes = [/^application\/pdf$/],
+      codeMimeTypes = [
+        /^application\/pdf$/,
+        /^application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet$/,
+      ],
+      codeResult = { storage_session_id: 'session-auto', file_id: 'code-file-auto' },
+      codeError,
+    } = {}) => {
+      mergeFileConfig.mockReturnValue({
+        ...makeFileConfig(),
+        endpoints: {
+          google: {
+            routing: {
+              mode: 'auto',
+              providerMimeTypes,
+              codeMimeTypes,
+            },
+          },
+        },
+      });
+
+      const codeUpload = codeError
+        ? jest.fn().mockRejectedValue(codeError)
+        : jest.fn().mockResolvedValue(codeResult);
+      const localUpload = jest.fn().mockResolvedValue({
+        bytes: 42,
+        filename: 'upload.bin',
+        filepath: '/uploads/upload.bin',
+      });
+      getStrategyFunctions.mockImplementation((src) =>
+        src === FileSources.execute_code
+          ? { handleFileUpload: codeUpload }
+          : { handleFileUpload: localUpload, saveBuffer: jest.fn() },
+      );
+
+      return { codeUpload, localUpload };
+    };
+
+    beforeEach(() => {
+      createReadStreamSpy = jest
+        .spyOn(fs, 'createReadStream')
+        .mockImplementation(() => Readable.from(Buffer.from('')));
+    });
+
+    afterEach(() => {
+      createReadStreamSpy.mockRestore();
+    });
+
+    it('routes an XLSX with no client resource to execute_code', async () => {
+      const { codeUpload, localUpload } = configureAutoRouting();
+      const req = makeReq({
+        mimetype: XLSX_MIME,
+        body: { endpoint: 'google' },
+      });
+
+      await processAgentFileUpload({
+        req,
+        res: mockRes,
+        metadata: {
+          agent_id: 'agent-abc',
+          file_id: 'file-uuid',
+          message_file: true,
+        },
+      });
+
+      expect(localUpload).toHaveBeenCalledTimes(1);
+      expect(codeUpload).toHaveBeenCalledTimes(1);
+      expect(db.createFile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: XLSX_MIME,
+          metadata: {
+            codeEnvRef: {
+              kind: 'user',
+              id: 'user-123',
+              storage_session_id: 'session-auto',
+              file_id: 'code-file-auto',
+            },
+          },
+        }),
+        true,
+      );
+    });
+
+    it('overrides a malicious provider resource for a code-only XLSX', async () => {
+      const { codeUpload } = configureAutoRouting({
+        providerMimeTypes: [/^application\/pdf$/],
+        codeMimeTypes: [/^application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet$/],
+      });
+      const req = makeReq({
+        mimetype: XLSX_MIME,
+        body: { endpoint: 'google' },
+      });
+
+      await processAgentFileUpload({
+        req,
+        res: mockRes,
+        metadata: {
+          agent_id: 'agent-abc',
+          tool_resource: EToolResources.context,
+          file_id: 'file-uuid',
+          message_file: true,
+        },
+      });
+
+      expect(codeUpload).toHaveBeenCalledTimes(1);
+      expect(db.createFile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: 'local',
+          type: XLSX_MIME,
+          metadata: expect.objectContaining({ codeEnvRef: expect.any(Object) }),
+        }),
+        true,
+      );
+    });
+
+    it('keeps a dual-routed PDF provider-native and registers it with Code API', async () => {
+      const { codeUpload, localUpload } = configureAutoRouting();
+      const req = makeReq({
+        mimetype: PDF_MIME,
+        body: { endpoint: 'google' },
+      });
+
+      await processAgentFileUpload({
+        req,
+        res: mockRes,
+        metadata: {
+          agent_id: 'agent-abc',
+          tool_resource: EToolResources.context,
+          file_id: 'file-uuid',
+          message_file: true,
+        },
+      });
+
+      expect(localUpload).toHaveBeenCalledTimes(1);
+      expect(codeUpload).toHaveBeenCalledTimes(1);
+      expect(db.createFile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: 'local',
+          type: PDF_MIME,
+          metadata: expect.objectContaining({ codeEnvRef: expect.any(Object) }),
+        }),
+        true,
+      );
+    });
+
+    it('does not call Code API for a provider-only file', async () => {
+      const { codeUpload, localUpload } = configureAutoRouting({
+        providerMimeTypes: [/^application\/pdf$/],
+        codeMimeTypes: [],
+      });
+      const req = makeReq({
+        mimetype: PDF_MIME,
+        body: { endpoint: 'google' },
+      });
+
+      await processAgentFileUpload({
+        req,
+        res: mockRes,
+        metadata: {
+          agent_id: 'agent-abc',
+          tool_resource: EToolResources.execute_code,
+          file_id: 'file-uuid',
+          message_file: true,
+        },
+      });
+
+      expect(localUpload).toHaveBeenCalledTimes(1);
+      expect(codeUpload).not.toHaveBeenCalled();
+      expect(db.createFile.mock.calls[0][0].metadata).toBeUndefined();
+    });
+
+    it('preserves an explicitly supplied execute_code resource in manual mode', async () => {
+      const codeUpload = jest
+        .fn()
+        .mockResolvedValue({ storage_session_id: 'manual-session', file_id: 'manual-file' });
+      const localUpload = jest.fn().mockResolvedValue({
+        bytes: 42,
+        filename: 'upload.bin',
+        filepath: '/uploads/upload.bin',
+      });
+      getStrategyFunctions.mockImplementation((src) =>
+        src === FileSources.execute_code
+          ? { handleFileUpload: codeUpload }
+          : { handleFileUpload: localUpload, saveBuffer: jest.fn() },
+      );
+      const req = makeReq({
+        mimetype: XLSX_MIME,
+        body: { endpoint: 'google' },
+      });
+
+      await processAgentFileUpload({
+        req,
+        res: mockRes,
+        metadata: {
+          agent_id: 'agent-abc',
+          tool_resource: EToolResources.execute_code,
+          file_id: 'file-uuid',
+          message_file: true,
+        },
+      });
+
+      expect(codeUpload).toHaveBeenCalledTimes(1);
+    });
+
+    it('surfaces a code-only registration failure without creating a provider attachment', async () => {
+      const registrationError = new Error('code registration unavailable');
+      const { localUpload } = configureAutoRouting({
+        providerMimeTypes: [/^application\/pdf$/],
+        codeMimeTypes: [/^application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet$/],
+        codeError: registrationError,
+      });
+      const req = makeReq({
+        mimetype: XLSX_MIME,
+        body: { endpoint: 'google' },
+      });
+
+      await expect(
+        processAgentFileUpload({
+          req,
+          res: mockRes,
+          metadata: {
+            agent_id: 'agent-abc',
+            tool_resource: EToolResources.context,
+            file_id: 'file-uuid',
+            message_file: true,
+          },
+        }),
+      ).rejects.toThrow('code registration unavailable');
+
+      expect(localUpload).toHaveBeenCalledTimes(1);
+      expect(db.createFile).not.toHaveBeenCalled();
+      expect(mockRes.json).not.toHaveBeenCalled();
+    });
+
+    it('preserves a provider-native upload with an explicit degraded registration status', async () => {
+      const { localUpload } = configureAutoRouting({
+        codeError: new Error('code registration unavailable'),
+      });
+      const req = makeReq({
+        mimetype: PDF_MIME,
+        body: { endpoint: 'google' },
+      });
+
+      await processAgentFileUpload({
+        req,
+        res: mockRes,
+        metadata: {
+          agent_id: 'agent-abc',
+          file_id: 'file-uuid',
+          message_file: true,
+        },
+      });
+
+      expect(localUpload).toHaveBeenCalledTimes(1);
+      expect(db.createFile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: PDF_MIME,
+          source: 'local',
+        }),
+        true,
+      );
+      expect(mockRes.status).toHaveBeenCalledWith(200);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({ code_registration_status: 'degraded' }),
+      );
+    });
+  });
+
+  /* The upload must persist its sandbox pointer under `metadata.codeEnvRef`.
+   * The legacy `metadata.fileIdentifier` key is stripped by mongoose strict
+   * mode, and downstream readers only recognize `codeEnvRef`. */
   describe('execute_code uploads persist codeEnvRef metadata', () => {
     const fs = require('fs');
     const { Readable } = require('stream');

@@ -45,6 +45,16 @@ describe('inferMimeType', () => {
     expect(inferMimeType('archive.zip', '')).toBe('application/zip');
     expect(inferMimeType('photo.heic', '')).toBe('image/heic');
     expect(inferMimeType('Main.java', '')).toBe('text/x-java');
+    expect(inferMimeType('workbook.xlsx', '')).toBe(
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    expect(inferMimeType('document.docx', '')).toBe(
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    );
+    expect(inferMimeType('slides.pptx', '')).toBe(
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    );
+    expect(inferMimeType('report.pdf', '')).toBe('application/pdf');
   });
 
   it('should return empty string for unknown extension with no browser type', () => {

@@ -6,6 +6,7 @@ const { sanitizeFilename } = require('@librechat/api');
 const {
   mergeFileConfig,
   inferMimeType,
+  resolveFileRouting,
   getEndpointFileConfig,
   fileConfig: defaultFileConfig,
 } = require('librechat-data-provider');
@@ -76,6 +77,11 @@ const createFileFilter = (customFileConfig) => {
     });
 
     if (!defaultFileConfig.checkType(mimeType, endpointFileConfig.supportedMimeTypes)) {
+      return cb(new Error('Unsupported file type: ' + (file.mimetype || mimeType)), false);
+    }
+
+    const routing = resolveFileRouting(mimeType, endpointFileConfig);
+    if (routing.mode === 'auto' && !routing.accepted) {
       return cb(new Error('Unsupported file type: ' + (file.mimetype || mimeType)), false);
     }
 

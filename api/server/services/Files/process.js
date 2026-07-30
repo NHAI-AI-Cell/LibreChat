@@ -16,6 +16,7 @@ const {
   removeNullishValues,
   isAssistantsEndpoint,
   getEndpointFileConfig,
+  resolveFileRouting,
   documentParserMimeTypes,
 } = require('librechat-data-provider');
 const { logger, runAsSystem } = require('@librechat/data-schemas');
@@ -665,9 +666,29 @@ const processFileUpload = async ({ req, res, metadata }) => {
 const processAgentFileUpload = async ({ req, res, metadata }) => {
   const { file } = req;
   const appConfig = req.config;
-  const { agent_id, tool_resource, file_id, temp_file_id = null } = metadata;
+  const { agent_id, file_id, temp_file_id = null } = metadata;
 
-  let messageAttachment = !!metadata.message_file;
+  const messageAttachment = !!metadata.message_file;
+  let tool_resource = metadata.tool_resource;
+  let automaticRouting;
+
+  if (messageAttachment) {
+    const fileConfig = mergeFileConfig(appConfig.fileConfig);
+    const endpointFileConfig = getEndpointFileConfig({
+      fileConfig,
+      endpoint: req.body.endpoint,
+      endpointType: req.body.endpointType,
+    });
+    const routing = resolveFileRouting(file.mimetype, endpointFileConfig);
+
+    if (routing.mode === 'auto') {
+      if (!routing.accepted) {
+        throw new Error(`Unsupported file type: ${file.mimetype}`);
+      }
+      automaticRouting = routing;
+      tool_resource = routing.code ? EToolResources.execute_code : undefined;
+    }
+  }
 
   if (agent_id && !tool_resource && !messageAttachment) {
     throw new Error('No tool resource provided for agent file upload');
@@ -685,7 +706,8 @@ const processAgentFileUpload = async ({ req, res, metadata }) => {
   let fileInfoMetadata;
   const entity_id = messageAttachment === true ? undefined : agent_id;
   const basePath = mime.getType(file.originalname)?.startsWith('image') ? 'images' : 'uploads';
-  if (tool_resource === EToolResources.execute_code) {
+
+  const registerCodeFile = async () => {
     const isCodeEnabled = await checkCapability(req, AgentCapabilities.execute_code);
     if (!isCodeEnabled) {
       throw new Error('Code execution is not enabled for Agents');
@@ -722,7 +744,7 @@ const processAgentFileUpload = async ({ req, res, metadata }) => {
      * `fileIdentifier` key would be silently dropped by mongoose strict
      * mode and the file would lose its sandbox reference on subsequent
      * priming turns. */
-    fileInfoMetadata = {
+    return {
       codeEnvRef: {
         kind: codeKind,
         id: codeId,
@@ -730,6 +752,10 @@ const processAgentFileUpload = async ({ req, res, metadata }) => {
         file_id: uploaded.file_id,
       },
     };
+  };
+
+  if (tool_resource === EToolResources.execute_code && automaticRouting == null) {
+    fileInfoMetadata = await registerCodeFile();
   } else if (tool_resource === EToolResources.file_search) {
     const isFileSearchEnabled = await checkCapability(req, AgentCapabilities.file_search);
     if (!isFileSearchEnabled) {
@@ -907,6 +933,21 @@ const processAgentFileUpload = async ({ req, res, metadata }) => {
     });
   }
 
+  let codeRegistrationStatus;
+  if (automaticRouting?.code === true) {
+    try {
+      fileInfoMetadata = await registerCodeFile();
+    } catch (error) {
+      if (!automaticRouting.provider) {
+        throw error;
+      }
+      codeRegistrationStatus = 'degraded';
+      logger.warn(
+        '[processAgentFileUpload] Code registration failed for a provider-native attachment; continuing with durable provider storage.',
+      );
+    }
+  }
+
   let {
     bytes,
     filename,
@@ -985,7 +1026,11 @@ const processAgentFileUpload = async ({ req, res, metadata }) => {
 
   const result = await db.createFile(fileInfo, true);
 
-  res.status(200).json({ message: 'Agent file uploaded and processed successfully', ...result });
+  res.status(200).json({
+    message: 'Agent file uploaded and processed successfully',
+    ...result,
+    ...(codeRegistrationStatus ? { code_registration_status: codeRegistrationStatus } : {}),
+  });
 };
 
 /**
