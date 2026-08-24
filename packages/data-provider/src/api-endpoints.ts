@@ -90,8 +90,6 @@ export const sharedFile = (shareId: string, fileId: string) =>
   `${shareRoot}/${shareId}/files/${encodeURIComponent(fileId)}`;
 export const sharedFileDownload = (shareId: string, fileId: string) =>
   `${sharedFile(shareId, fileId)}/download`;
-export const sharedFilePreview = (shareId: string, fileId: string) =>
-  `${sharedFile(shareId, fileId)}/preview`;
 
 const keysEndpoint = `${BASE_URL}/api/keys`;
 
@@ -309,11 +307,6 @@ export const fileUpload = () => `${BASE_URL}/api/files`;
 export const fileDelete = () => `${BASE_URL}/api/files`;
 export const fileDownload = (userId: string, fileId: string) =>
   `${BASE_URL}/api/files/download/${userId}/${fileId}`;
-/* Deferred-preview lifecycle endpoint. Returns
- * `{ status, text?, textFormat?, previewError? }` so the frontend can
- * poll while background HTML extraction is in flight. See PR #12957. */
-export const filePreview = (fileId: string) =>
-  `${BASE_URL}/api/files/${encodeURIComponent(fileId)}/preview`;
 export const fileConfig = () => `${BASE_URL}/api/files/config`;
 export const agentFiles = (agentId: string) => `${BASE_URL}/api/files/agent/${agentId}`;
 

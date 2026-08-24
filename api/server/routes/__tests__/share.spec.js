@@ -70,7 +70,6 @@ jest.mock('mongoose', () => ({
 
 jest.mock('~/models', () => ({
   getFiles: jest.fn(),
-  updateFile: jest.fn(),
   getSharedMessages: jest.fn(),
   createSharedLink: jest.fn(),
   updateSharedLink: jest.fn(),
@@ -115,7 +114,6 @@ const {
 } = require('@librechat/api');
 const {
   getFiles,
-  updateFile,
   getSharedMessages,
   createSharedLink,
   updateSharedLink,
@@ -581,25 +579,6 @@ describe('share-scoped file routes', () => {
     expect(response.headers['content-disposition']).toContain('attachment');
   });
 
-  it('returns preview status read live from the file record', async () => {
-    getSharedLinkFile.mockResolvedValue({
-      file: { file_id: 'file-1', source: 'local' },
-      hasSnapshots: true,
-    });
-    getFiles.mockResolvedValue([{ status: 'ready', text: 'extracted text', textFormat: 'text' }]);
-
-    const response = await request(buildApp()).get('/api/share/share-123/files/file-1/preview');
-
-    expect(response.status).toBe(200);
-    expect(response.body).toEqual({
-      file_id: 'file-1',
-      status: 'ready',
-      text: 'extracted text',
-      textFormat: 'text',
-    });
-    expect(getFiles).toHaveBeenCalledWith({ file_id: 'file-1' }, null, {});
-  });
-
   it('404s for a file not in the snapshot without rebuilding it', async () => {
     getSharedLinkFile.mockResolvedValue({ file: null, hasSnapshots: true });
 
@@ -710,28 +689,5 @@ describe('share-scoped file routes', () => {
 
     expect(response.status).toBe(200);
     expect(getDownloadStream).toHaveBeenCalledWith(expect.anything(), '/images/owner/pic.png');
-  });
-
-  it('sweeps an orphaned pending preview to failed', async () => {
-    getSharedLinkFile.mockResolvedValue({
-      file: { file_id: 'file-1', source: 'local' },
-      hasSnapshots: true,
-    });
-    const stale = new Date(Date.now() - 5 * 60 * 1000);
-    getFiles.mockResolvedValue([{ status: 'pending', updatedAt: stale }]);
-    updateFile.mockResolvedValue({ status: 'failed', previewError: 'orphaned' });
-
-    const response = await request(buildApp()).get('/api/share/share-123/files/file-1/preview');
-
-    expect(response.status).toBe(200);
-    expect(response.body).toEqual({
-      file_id: 'file-1',
-      status: 'failed',
-      previewError: 'orphaned',
-    });
-    expect(updateFile).toHaveBeenCalledWith(
-      { file_id: 'file-1', status: 'failed', previewError: 'orphaned' },
-      { status: 'pending', updatedAt: stale },
-    );
   });
 });

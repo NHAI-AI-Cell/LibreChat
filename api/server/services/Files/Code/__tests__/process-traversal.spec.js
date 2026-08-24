@@ -34,13 +34,6 @@ jest.mock('@librechat/api', () => {
      * downstream consumers don't see a phantom format. */
     getExtractedTextFormat: jest.fn(() => null),
     getStorageMetadata: jest.fn(() => ({})),
-    /* Pass-through `withTimeout`: this suite asserts traversal sanitization,
-     * not deferred preview timing. */
-    withTimeout: async (promise) => promise,
-    /* These traversal cases all use non-office filenames — keep the
-     * inline (non-finalize) path so existing assertions on a single
-     * createFile call hold. */
-    hasOfficeHtmlPath: jest.fn(() => false),
     /* Identity-helper stub mirroring `packages/api/src/files/code/identity.ts`.
      * `processCodeOutput` calls this for every output download URL;
      * traversal cases don't care about the query shape, just that it

@@ -45,13 +45,9 @@ export default function useArtifactProps({ artifact }: { artifact: Artifact }) {
       return ['content.md', getMarkdownFiles(artifact.content ?? '')];
     }
 
-    /* Office preview buckets (DOCX/SPREADSHEET/PRESENTATION): the backend
-     * already produced a complete sanitized HTML document via
-     * `bufferToOfficeHtml` and shipped it as `attachment.text`. Hand it
-     * to the Sandpack `static` template's `index.html` slot directly —
-     * no wrapping, no transformation, no client-side parsing libs. The
-     * empty-text gate in `detectArtifactTypeFromFile` guarantees we
-     * never reach this branch with an empty content payload. */
+    /* Compatibility for already-materialized legacy Office artifacts.
+     * New generated Office attachments are download-only and never reach
+     * this branch. */
     if (
       type === TOOL_ARTIFACT_TYPES.DOCX ||
       type === TOOL_ARTIFACT_TYPES.SPREADSHEET ||

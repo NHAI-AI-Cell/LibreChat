@@ -10,7 +10,7 @@ const express = require('express');
 const passport = require('passport');
 const compression = require('compression');
 const cookieParser = require('cookie-parser');
-const { logger, runAsSystem } = require('@librechat/data-schemas');
+const { logger } = require('@librechat/data-schemas');
 const mongoSanitize = require('express-mongo-sanitize');
 const {
   isEnabled,
@@ -31,12 +31,7 @@ const { startExpiredFileSweep } = require('./services/Files/process');
 const { initializeGitHubSkillSync } = require('./services/Skills/sync');
 const { jwtLogin, ldapLogin, passportLogin } = require('~/strategies');
 const { updateInterfacePermissions: updateInterfacePerms } = require('@librechat/api');
-const {
-  getRoleByName,
-  updateAccessPermissions,
-  seedDatabase,
-  sweepOrphanedPreviews,
-} = require('~/models');
+const { getRoleByName, updateAccessPermissions, seedDatabase } = require('~/models');
 const { checkMigrations } = require('./services/start/migration');
 const initializeMCPs = require('./services/initializeMCPs');
 const configureSocialLogins = require('./socialLogins');
@@ -290,11 +285,6 @@ if (cluster.isMaster) {
 
     /** Seed database (idempotent) */
     await seedDatabase();
-
-    /* Mirrors `server/index.js`; `runAsSystem` for tenant-isolated File. */
-    runAsSystem(sweepOrphanedPreviews).catch((err) => {
-      logger.error('[sweepOrphanedPreviews] Background sweep failed:', err);
-    });
 
     /** Initialize app configuration */
     const appConfig = await getAppConfig();

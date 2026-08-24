@@ -104,9 +104,8 @@ describe('LogContent attachment routing', () => {
   });
 
   it('routes text-bearing JSON through inline <pre>, not the panel', () => {
-    /* CSV used to fall through here, but now routes to the SPREADSHEET
-     * preview bucket. JSON has no dedicated viewer yet, so it remains
-     * the canonical "unrouted text" example. */
+    /* JSON has no dedicated viewer, so it remains the canonical
+     * "unrouted text" example. */
     const json = baseAttachment({
       file_id: 'c',
       filename: 'data.json',
@@ -127,24 +126,19 @@ describe('LogContent attachment routing', () => {
     expect(screen.getByTestId('log-link')).toHaveAttribute('data-filename', 'archive.zip');
   });
 
-  it('renders a panel card for a pptx with backend-rendered HTML in text', () => {
-    /* PPTX (and DOCX/XLSX/CSV) now route through the office preview
-     * bucket with a strict empty-text gate — the artifact only registers
-     * once the backend's `bufferToOfficeHtml` has produced the slide-list
-     * HTML and shipped it via `attachment.text`. */
+  it('routes a pptx with legacy preview HTML to the original-file download', () => {
     const pptx = baseAttachment({
       file_id: 'e',
       filename: 'slides.pptx',
       text: '<!DOCTYPE html><body><ol><li>Slide 1</li></ol></body>',
+      textFormat: 'html',
     });
     renderWith(<LogContent output="" attachments={[pptx]} />);
-    expect(screen.getByText('slides.pptx')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { pressed: true })).not.toBeInTheDocument();
+    expect(screen.getByTestId('log-link')).toHaveAttribute('data-filename', 'slides.pptx');
   });
 
-  it('falls back to the legacy download branch for an office file with no extracted text', () => {
-    /* Empty `text` for an office type fails the strict gate, so the
-     * artifact stays unregistered and the file flows to the download
-     * fallback (LogLink), not a half-rendered panel card. */
+  it('routes an Office file without extracted text to the download', () => {
     const pptx = baseAttachment({
       file_id: 'e2',
       filename: 'slides.pptx',

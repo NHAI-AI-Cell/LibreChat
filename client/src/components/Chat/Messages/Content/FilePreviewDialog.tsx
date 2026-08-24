@@ -83,6 +83,10 @@ function canPreviewByExt(filename: string): 'pdf' | 'text' | false {
   return textExts.has(ext) ? 'text' : false;
 }
 
+export function getFilePreviewKind(fileName: string, fileType?: string): 'pdf' | 'text' | false {
+  return canPreviewByMime(fileType) || canPreviewByExt(fileName);
+}
+
 /** Formats bytes with unit suffix (differs from ~/utils/formatBytes which returns a raw number). */
 function formatBytes(bytes: number): string {
   if (bytes >= 1048576) {
@@ -154,7 +158,7 @@ export default function FilePreviewDialog({
   const [isCopied, setIsCopied] = useState(false);
   const loadingRef = useRef(false);
 
-  const previewKind = canPreviewByMime(fileType) || canPreviewByExt(fileName);
+  const previewKind = getFilePreviewKind(fileName, fileType);
 
   const cancelledRef = useRef(false);
 
