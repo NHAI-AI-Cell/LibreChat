@@ -12,6 +12,7 @@ const {
   updateSharedLinkPermissionsExpiration,
   isActiveExpirationDate,
   getSharedLinkExpiration,
+  resolveStoredObjectRef,
 } = require('@librechat/api');
 const {
   logger,
@@ -141,16 +142,18 @@ const resolveShareFile = async (req, res, next) => {
       return res.status(404).json({ message: 'File no longer available' });
     }
 
-    // Pin to the snapshotted version so an old link can't surface post-share content
-    // after a reused file_id (e.g. code-exec same-filename outputs) is overwritten.
-    // Legacy previewRevision still detects reuse of records created by older
-    // servers; `bytes` catches size-changing overwrites for current records.
-    // Same-size content swaps remain a best-effort gap in the no-byte-copy design.
+    // Pin to the exact stored object so an old link cannot follow a later
+    // publication that reused the logical file_id. Legacy previewRevision and
+    // byte checks remain as additional rejection signals for mutable old rows.
+    const snapshotObject = resolveStoredObjectRef(snapshot);
+    const liveObject = resolveStoredObjectRef(liveFile);
+    const storedObjectChanged =
+      !snapshotObject || !liveObject || snapshotObject.identity !== liveObject.identity;
     const revisionChanged =
       (snapshot.previewRevision ?? null) !== (liveFile.previewRevision ?? null);
     const bytesChanged =
       snapshot.bytes != null && liveFile.bytes != null && snapshot.bytes !== liveFile.bytes;
-    if (revisionChanged || bytesChanged) {
+    if (storedObjectChanged || revisionChanged || bytesChanged) {
       logger.warn(
         `[shareFileAccess] Snapshot version mismatch for file ${file_id} (share ${shareId})`,
       );
@@ -158,7 +161,7 @@ const resolveShareFile = async (req, res, next) => {
     }
 
     req.shareFile = snapshot;
-    req.liveFile = liveFile;
+    req.shareStoredObject = snapshotObject;
     return next();
   } catch (error) {
     logger.error('[shareFileAccess] Error resolving shared file:', error);
@@ -167,7 +170,7 @@ const resolveShareFile = async (req, res, next) => {
 };
 
 /** Stream (or redirect to) a snapshotted file from its original stored object. */
-const streamSharedFile = async (req, res, file, requestedDisposition) => {
+const streamSharedFile = async (req, res, file, storedObject, requestedDisposition) => {
   const source = file.source || FileSources.local;
   const { getDownloadStream, getDownloadURL } = getStrategyFunctions(source);
 
@@ -199,10 +202,7 @@ const streamSharedFile = async (req, res, file, requestedDisposition) => {
     return res.status(501).send('Not Implemented');
   }
 
-  // Strip any cache-busting query string (e.g. code-output images add `?v=...`) so
-  // the local stream resolves the real filename, not a literal `*.png?v=...` path.
-  const streamPath = (file.storageKey || file.filepath || '').split('?')[0];
-  const fileStream = await getDownloadStream(req, streamPath);
+  const fileStream = await getDownloadStream(req, storedObject.streamPath);
   fileStream.on('error', (error) => {
     logger.error('[shareFileAccess] Stream error:', error);
   });
@@ -265,7 +265,7 @@ if (allowSharedLinks) {
     async (req, res) => {
       try {
         await runWithTenant(req.shareFile.tenantId, () =>
-          streamSharedFile(req, res, req.shareFile, 'attachment'),
+          streamSharedFile(req, res, req.shareFile, req.shareStoredObject, 'attachment'),
         );
       } catch (error) {
         logger.error('[shareFileAccess] Error downloading shared file:', error);
@@ -287,7 +287,7 @@ if (allowSharedLinks) {
     async (req, res) => {
       try {
         await runWithTenant(req.shareFile.tenantId, () =>
-          streamSharedFile(req, res, req.shareFile, 'inline'),
+          streamSharedFile(req, res, req.shareFile, req.shareStoredObject, 'inline'),
         );
       } catch (error) {
         logger.error('[shareFileAccess] Error serving shared file:', error);

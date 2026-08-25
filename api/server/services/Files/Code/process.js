@@ -197,6 +197,10 @@ const processCodeOutput = async ({
     });
     const file_id = claimed.file_id;
     const isUpdate = file_id !== newFileId;
+    // `file_id` identifies the logical filename slot. Each publication gets
+    // a new physical object so a stored share snapshot can never follow a
+    // later same-name rewrite.
+    const publicationId = v4();
 
     if (isUpdate) {
       logger.debug(
@@ -216,7 +220,12 @@ const processCodeOutput = async ({
 
     if (isImage) {
       const usage = isUpdate ? (claimed.usage ?? 0) + 1 : 1;
-      const _file = await convertImage(req, buffer, 'high', `${file_id}${fileExt}`);
+      const _file = await convertImage(
+        req,
+        buffer,
+        'high',
+        `${file_id}__${publicationId}${fileExt}`,
+      );
       const filepath = usage > 1 ? `${_file.filepath}?v=${Date.now()}` : _file.filepath;
       const storageMetadata = getStorageMetadata({
         filepath: _file.filepath,
@@ -285,13 +294,14 @@ const processCodeOutput = async ({
      * path component (NAME_MAX = 255 on most filesystems); without this
      * cap, deeply-nested artifact paths whose individual segments were
      * within bounds can still produce a flat form that overflows once
-     * `${file_id}__` is prepended, causing `ENAMETOOLONG` inside
+     * `${file_id}__${publicationId}__` is prepended, causing `ENAMETOOLONG` inside
      * saveBuffer and falling back to a download URL. The 255 figure is
      * the conservative cross-platform NAME_MAX (Linux ext4, NTFS, APFS).
      */
     const NAME_MAX = 255;
-    const flatName = flattenArtifactPath(safeName, NAME_MAX - file_id.length - 2);
-    const fileName = `${file_id}__${flatName}`;
+    const storagePrefix = `${file_id}__${publicationId}__`;
+    const flatName = flattenArtifactPath(safeName, NAME_MAX - storagePrefix.length);
+    const fileName = `${storagePrefix}${flatName}`;
     const filepath = await saveBuffer({
       userId: req.user.id,
       buffer,

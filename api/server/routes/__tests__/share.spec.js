@@ -10,6 +10,16 @@ const mockBuildSharedLinkStartupPayload = jest.fn();
 const mockCanAccessSharedLink = jest.fn((_req, _res, next) => next());
 const mockGetAppConfig = jest.fn();
 const mockGetTenantId = jest.fn(() => undefined);
+const mockResolveStoredObjectRef = jest.fn((file) => {
+  const streamPath = (file?.storageKey || file?.filepath || '').split(/[?#]/)[0];
+  if (!streamPath) {
+    return null;
+  }
+  return {
+    identity: `${file?.source || 'local'}:${streamPath}`,
+    streamPath,
+  };
+});
 
 jest.mock('@librechat/api', () => ({
   isEnabled: jest.fn(() => true),
@@ -21,6 +31,7 @@ jest.mock('@librechat/api', () => ({
   isFileSnapshotEnabled: jest.fn(() => true),
   isFileSnapshotKillSwitchActive: jest.fn(() => false),
   buildSharedLinkStartupPayload: (...args) => mockBuildSharedLinkStartupPayload(...args),
+  resolveStoredObjectRef: (...args) => mockResolveStoredObjectRef(...args),
   deleteSharedLinkWithCleanup: jest.fn(),
   getSharedLinkExpiration: (...args) => mockGetSharedLinkExpiration(...args),
   isActiveExpirationDate: jest.fn((expiredAt) => expiredAt > new Date()),
@@ -511,7 +522,9 @@ describe('share-scoped file routes', () => {
       getDownloadStream: jest.fn(async () => Readable.from(['file-bytes'])),
     });
     // Live file record present by default (resolveShareFile requires it).
-    getFiles.mockResolvedValue([{ status: 'ready' }]);
+    getFiles.mockResolvedValue([
+      { status: 'ready', source: 'local', filepath: '/images/owner/pic.png' },
+    ]);
   });
 
   it('serves a snapshotted image inline from its original stored object', async () => {
@@ -552,6 +565,9 @@ describe('share-scoped file routes', () => {
       },
       hasSnapshots: true,
     });
+    getFiles.mockResolvedValue([
+      { status: 'ready', source: 'local', filepath: '/uploads/owner/evil.svg' },
+    ]);
 
     const response = await request(buildApp()).get('/api/share/share-123/files/file-1');
 
@@ -572,11 +588,46 @@ describe('share-scoped file routes', () => {
       },
       hasSnapshots: true,
     });
+    getFiles.mockResolvedValue([
+      { status: 'ready', source: 'local', filepath: '/uploads/owner/file-1' },
+    ]);
 
     const response = await request(buildApp()).get('/api/share/share-123/files/file-1/download');
 
     expect(response.status).toBe(200);
     expect(response.headers['content-disposition']).toContain('attachment');
+  });
+
+  it('generates a direct URL for the same snapshotted object that passed authorization', async () => {
+    const getDownloadURL = jest.fn().mockResolvedValue('https://signed.example.com/report.pdf');
+    mockGetStrategyFunctions.mockReturnValue({ getDownloadURL });
+    const snapshot = {
+      file_id: 'file-1',
+      source: 's3',
+      storageKey: 'r/us-east-2/uploads/owner/report.pdf',
+      filepath: 'https://old.example.com/report.pdf?signature=old',
+      type: 'application/pdf',
+      filename: 'report.pdf',
+    };
+    getSharedLinkFile.mockResolvedValue({ file: snapshot, hasSnapshots: true });
+    getFiles.mockResolvedValue([
+      {
+        source: 's3',
+        storageKey: 'r/us-east-2/uploads/owner/report.pdf',
+        filepath: 'https://new.example.com/report.pdf?signature=new',
+      },
+    ]);
+
+    const response = await request(buildApp()).get(
+      '/api/share/share-123/files/file-1/download?direct=true',
+    );
+
+    expect(response.status).toBe(302);
+    expect(getDownloadURL).toHaveBeenCalledWith(
+      expect.objectContaining({
+        file: snapshot,
+      }),
+    );
   });
 
   it('404s for a file not in the snapshot without rebuilding it', async () => {
@@ -669,6 +720,30 @@ describe('share-scoped file routes', () => {
     expect(mockGetStrategyFunctions).not.toHaveBeenCalled();
   });
 
+  it('404s when equal-size content was published at a different stored-object locator', async () => {
+    getSharedLinkFile.mockResolvedValue({
+      file: {
+        file_id: 'file-1',
+        source: 'local',
+        filepath: '/uploads/owner/generation-1/report.xlsx',
+        bytes: 100,
+      },
+      hasSnapshots: true,
+    });
+    getFiles.mockResolvedValue([
+      {
+        source: 'local',
+        filepath: '/uploads/owner/generation-2/report.xlsx',
+        bytes: 100,
+      },
+    ]);
+
+    const response = await request(buildApp()).get('/api/share/share-123/files/file-1/download');
+
+    expect(response.status).toBe(404);
+    expect(mockGetStrategyFunctions).not.toHaveBeenCalled();
+  });
+
   it('strips a cache-busting query string before local streaming', async () => {
     const getDownloadStream = jest.fn(async () => Readable.from(['bytes']));
     mockGetStrategyFunctions.mockReturnValue({ getDownloadStream });
@@ -683,7 +758,14 @@ describe('share-scoped file routes', () => {
       },
       hasSnapshots: true,
     });
-    getFiles.mockResolvedValue([{ status: 'ready', bytes: 100 }]);
+    getFiles.mockResolvedValue([
+      {
+        status: 'ready',
+        source: 'local',
+        filepath: '/images/owner/pic.png',
+        bytes: 100,
+      },
+    ]);
 
     const response = await request(buildApp()).get('/api/share/share-123/files/file-1');
 

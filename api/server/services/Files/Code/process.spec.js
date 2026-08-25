@@ -33,8 +33,9 @@ jest.mock('librechat-data-provider', () => {
 const { FileContext } = require('librechat-data-provider');
 
 // Mock uuid
+const mockUuidV4 = jest.fn();
 jest.mock('uuid', () => ({
-  v4: jest.fn(() => 'mock-uuid-1234'),
+  v4: (...args) => mockUuidV4(...args),
 }));
 
 // Mock axios — process.js now uses createAxiosInstance() from @librechat/api
@@ -176,6 +177,8 @@ describe('Code Process', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockUuidV4.mockReset();
+    mockUuidV4.mockReturnValueOnce('mock-uuid-1234').mockReturnValue('mock-generation-5678');
     // Default mock: atomic claim returns a new file record (no existing file)
     mockClaimCodeFile.mockResolvedValue({
       file_id: 'mock-uuid-1234',
@@ -269,7 +272,7 @@ describe('Code Process', () => {
           mockReq,
           imageBuffer,
           'high',
-          'mock-uuid-1234.png',
+          'mock-uuid-1234__mock-generation-5678.png',
         );
         expect(result.type).toBe('image/webp');
         expect(result.context).toBe(FileContext.execute_code);
@@ -317,7 +320,7 @@ describe('Code Process', () => {
           mockReq,
           imageBuffer,
           'high',
-          'existing-img-id.png',
+          'existing-img-id__mock-generation-5678.png',
         );
         expect(result.file_id).toBe('existing-img-id');
         expect(result.usage).toBe(2);
@@ -329,6 +332,33 @@ describe('Code Process', () => {
     });
 
     describe('non-image file processing', () => {
+      it('uses a new physical storage name when the logical file slot is reused', async () => {
+        mockUuidV4
+          .mockReset()
+          .mockReturnValueOnce('candidate-file-id-1')
+          .mockReturnValueOnce('generation-1')
+          .mockReturnValueOnce('candidate-file-id-2')
+          .mockReturnValueOnce('generation-2');
+        mockClaimCodeFile.mockResolvedValue({
+          file_id: 'existing-file-id',
+          filename: 'test-file.txt',
+          usage: 1,
+          createdAt: '2024-01-01T00:00:00.000Z',
+        });
+        mockAxios.mockResolvedValue({ data: Buffer.alloc(100) });
+
+        const mockSaveBuffer = jest.fn().mockResolvedValue('/uploads/saved-file.txt');
+        getStrategyFunctions.mockReturnValue({ saveBuffer: mockSaveBuffer });
+
+        await processCodeOutput(baseParams);
+        await processCodeOutput(baseParams);
+
+        expect(mockSaveBuffer.mock.calls.map(([call]) => call.fileName)).toEqual([
+          'existing-file-id__generation-1__test-file.txt',
+          'existing-file-id__generation-2__test-file.txt',
+        ]);
+      });
+
       it('should process non-image files using saveBuffer', async () => {
         const smallBuffer = Buffer.alloc(100);
         mockAxios.mockResolvedValue({ data: smallBuffer });
@@ -342,7 +372,7 @@ describe('Code Process', () => {
         expect(mockSaveBuffer).toHaveBeenCalledWith({
           userId: 'user-123',
           buffer: smallBuffer,
-          fileName: 'mock-uuid-1234__test-file.txt',
+          fileName: 'mock-uuid-1234__mock-generation-5678__test-file.txt',
           basePath: 'uploads',
         });
         expect(result.type).toBe('text/plain');
@@ -367,8 +397,8 @@ describe('Code Process', () => {
           config: { ...mockReq.config, fileStrategy: 'cloudfront' },
         };
         const smallBuffer = Buffer.alloc(100);
-        const filepath = `https://cdn.example.com/r/us-east-2/t/tenantA/uploads/user-123/mock-uuid-1234__${name}`;
-        const storageKey = `r/us-east-2/t/tenantA/uploads/user-123/mock-uuid-1234__${name}`;
+        const filepath = `https://cdn.example.com/r/us-east-2/t/tenantA/uploads/user-123/mock-uuid-1234__mock-generation-5678__${name}`;
+        const storageKey = `r/us-east-2/t/tenantA/uploads/user-123/mock-uuid-1234__mock-generation-5678__${name}`;
         mockAxios.mockResolvedValue({ data: smallBuffer });
         determineFileType.mockResolvedValue({ mime });
         mockClassifyGeneratedFile.mockReturnValueOnce({
@@ -467,7 +497,7 @@ describe('Code Process', () => {
         // accidentally create real subdirectories under uploads/.
         expect(mockSaveBuffer).toHaveBeenCalledWith(
           expect.objectContaining({
-            fileName: 'mock-uuid-1234__test_folder__test_file.txt',
+            fileName: 'mock-uuid-1234__mock-generation-5678__test_folder__test_file.txt',
           }),
         );
         // DB row keeps the nested path verbatim — that's what primeFiles
@@ -501,9 +531,9 @@ describe('Code Process', () => {
 
         // The handler should call flattenArtifactPath with both the
         // safeName AND a budget = NAME_MAX (255) minus the prefix
-        // (`${file_id}__`). file_id mock is `mock-uuid-1234` (14 chars),
-        // so the budget should be 255 - 14 - 2 = 239.
-        expect(flattenSpy).toHaveBeenCalledWith(expect.any(String), 239);
+        // (`${file_id}__${publicationId}__`). The mocked prefix is 38 chars,
+        // so the remaining budget is 255 - 38 = 217.
+        expect(flattenSpy).toHaveBeenCalledWith(expect.any(String), 217);
       });
 
       it('passes the basename (not the full nested path) to classifyCodeArtifact and extractCodeArtifactText', async () => {

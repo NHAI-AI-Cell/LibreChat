@@ -128,8 +128,9 @@ describe('processCodeOutput path traversal protection', () => {
     expect(mockSanitizeArtifactPath).toHaveBeenCalledWith('../../../tmp/poc.txt');
     const call = mockSaveBuffer.mock.calls[0][0];
     /* `flattenArtifactPath` is identity for already-flat names; the assert
-     * is against the storage-key composition (`<file_id>__<flat>`). */
-    expect(call.fileName).toBe('mock-uuid__sanitized-name.txt');
+     * is against the storage-key composition
+     * (`<file_id>__<publication_id>__<flat>`). */
+    expect(call.fileName).toBe('mock-uuid__mock-uuid__sanitized-name.txt');
   });
 
   test('sanitized name is stored as filename in the file record', async () => {
