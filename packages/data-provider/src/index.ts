@@ -4,6 +4,7 @@ export * from './bedrock';
 export * from './balance';
 export * from './config';
 export * from './file-config';
+export * from './generated-file-policy';
 /* messages  */
 export * from './messages';
 /* artifacts  */

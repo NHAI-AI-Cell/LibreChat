@@ -1,14 +1,4 @@
-/**
- * Coverage for `useAttachments` — the merge layer that overlays live
- * (SSE / poll-driven) attachment lifecycle fields onto DB-loaded
- * attachments by `file_id`.
- *
- * The merge is the only thing that lets the deferred-preview flow
- * recover on a reloaded conversation: messages persist with the
- * immediate-snapshot `status: 'pending'`, but the file record itself
- * resolves to `'ready'` later. Without the by-file_id overlay, the
- * renderer would route through the plain file chip forever.
- */
+/** Coverage for merging live attachment metadata into DB-loaded messages. */
 
 import { useEffect } from 'react';
 import { Tools } from 'librechat-data-provider';

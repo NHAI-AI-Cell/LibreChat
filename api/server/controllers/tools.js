@@ -11,7 +11,7 @@ const {
 const { getRoleByName, createToolCall, getToolCallsByConvo, getMessage } = require('~/models');
 const { processFileURL, uploadImageBuffer } = require('~/server/services/Files/process');
 const { getRetentionExpiry } = require('~/server/services/Files/retention');
-const { processCodeOutput, runPreviewFinalize } = require('~/server/services/Files/Code/process');
+const { processCodeOutput } = require('~/server/services/Files/Code/process');
 const { loadAuthValues } = require('~/server/services/Tools/credentials');
 const { loadTools } = require('~/app/clients/tools/util');
 
@@ -204,21 +204,9 @@ const callTool = async (req, res) => {
             session_id: artifact.session_id,
           });
           const fileMetadata = result?.file ?? null;
-          const finalize = result?.finalize;
           if (!fileMetadata) {
             return null;
           }
-          /* This endpoint is non-streaming and its contract is "give
-           * me the artifacts" — return the persisted record immediately
-           * (with `status: 'pending'` for office buckets) and run the
-           * preview render in the background. The client polls
-           * `/api/files/:file_id/preview` for the resolved record.
-           * No `onResolved` — there's no live stream to write to here. */
-          runPreviewFinalize({
-            finalize,
-            fileId: fileMetadata.file_id,
-            previewRevision: result?.previewRevision,
-          });
           return fileMetadata;
         })().catch((error) => {
           logger.error('Error processing code output:', error);

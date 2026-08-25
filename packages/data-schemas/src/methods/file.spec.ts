@@ -2,8 +2,6 @@ import mongoose from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { EToolResources, FileContext } from 'librechat-data-provider';
-import { _resetStrictCache } from '~/models/plugins/tenantIsolation';
-import { runAsSystem } from '~/config/tenantContext';
 import { createFileMethods } from './file';
 import { createModels } from '~/models';
 
@@ -786,11 +784,6 @@ describe('File Methods', () => {
       expect(updated?.expiresAt).toBeUndefined();
     });
 
-    /* The optional `extraFilter` enables conditional updates — used by
-     * the deferred-preview render's `finalizePreview` to guard against
-     * an older render of the same `file_id` overwriting a newer turn's
-     * record on cross-turn filename reuse. (Codex P1 review on PR
-     * #12957.) */
     describe('extraFilter (conditional update)', () => {
       it('commits when the extra filter matches the current document', async () => {
         const fileId = uuidv4();
@@ -798,22 +791,17 @@ describe('File Methods', () => {
         await fileMethods.createFile({
           file_id: fileId,
           user: userId,
-          filename: 'data.xlsx',
-          filepath: '/uploads/data.xlsx',
-          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          filename: 'data.txt',
+          filepath: '/uploads/data.txt',
+          type: 'text/plain',
           bytes: 100,
-          status: 'pending',
-          previewRevision: 'rev-A',
+          usage: 1,
         });
 
-        const updated = await fileMethods.updateFile(
-          { file_id: fileId, status: 'ready', text: '<table></table>' },
-          { previewRevision: 'rev-A' },
-        );
+        const updated = await fileMethods.updateFile({ file_id: fileId, bytes: 200 }, { usage: 1 });
 
         expect(updated).not.toBeNull();
-        expect(updated?.status).toBe('ready');
-        expect(updated?.text).toBe('<table></table>');
+        expect(updated?.bytes).toBe(200);
       });
 
       it('returns null and skips the write when the extra filter does NOT match', async () => {
@@ -822,29 +810,20 @@ describe('File Methods', () => {
         await fileMethods.createFile({
           file_id: fileId,
           user: userId,
-          filename: 'data.xlsx',
-          filepath: '/uploads/data.xlsx',
-          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          filename: 'data.txt',
+          filepath: '/uploads/data.txt',
+          type: 'text/plain',
           bytes: 100,
-          status: 'pending',
-          previewRevision: 'rev-B', // newer turn has rotated the revision
+          usage: 2,
         });
 
-        /* An older render that started while revision was 'rev-A' tries
-         * to commit. The newer turn has since rotated to 'rev-B'. The
-         * conditional update silently no-ops. */
-        const updated = await fileMethods.updateFile(
-          { file_id: fileId, status: 'ready', text: '<stale/>' },
-          { previewRevision: 'rev-A' },
-        );
+        const updated = await fileMethods.updateFile({ file_id: fileId, bytes: 999 }, { usage: 1 });
 
         expect(updated).toBeNull();
 
-        /* Critical: the newer record's text MUST be untouched. */
         const fresh = await fileMethods.findFileById(fileId);
-        expect(fresh?.previewRevision).toBe('rev-B');
-        expect(fresh?.status).toBe('pending');
-        expect(fresh?.text).toBeUndefined();
+        expect(fresh?.bytes).toBe(100);
+        expect(fresh?.usage).toBe(2);
       });
 
       it('falls back to single-key update when extraFilter is omitted (back-compat)', async () => {
@@ -1274,135 +1253,6 @@ describe('File Methods', () => {
 
     it('should handle empty updates array gracefully', async () => {
       await expect(fileMethods.batchUpdateFiles([])).resolves.toBeUndefined();
-    });
-  });
-
-  describe('sweepOrphanedPreviews', () => {
-    /* The deferred-preview flow runs the deferred render in-process. If the
-     * backend restarts mid-extraction, records stay at `status: 'pending'`
-     * forever. The boot-time sweep transitions stale ones to 'failed'
-     * with `previewError: 'orphaned'` so the frontend stops polling. */
-    const userId = new mongoose.Types.ObjectId();
-
-    /**
-     * Stamp a precise `updatedAt` on a file record. Mongoose timestamps
-     * insist on the current time during create, so we backdate via a
-     * direct collection write afterwards.
-     */
-    async function makeFile(opts: {
-      ageMs: number;
-      status?: 'pending' | 'ready' | 'failed';
-    }): Promise<string> {
-      const fileId = uuidv4();
-      await fileMethods.createFile({
-        file_id: fileId,
-        user: userId,
-        filename: `${fileId}.xlsx`,
-        filepath: `/uploads/${fileId}.xlsx`,
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        bytes: 1024,
-        ...(opts.status ? { status: opts.status } : {}),
-      });
-      const backdated = new Date(Date.now() - opts.ageMs);
-      await File.collection.updateOne({ file_id: fileId }, { $set: { updatedAt: backdated } });
-      return fileId;
-    }
-
-    it('marks stale pending records as failed with previewError:orphaned', async () => {
-      const stale = await makeFile({ ageMs: 10 * 60 * 1000, status: 'pending' });
-      const fresh = await makeFile({ ageMs: 30 * 1000, status: 'pending' });
-
-      const count = await fileMethods.sweepOrphanedPreviews();
-      expect(count).toBe(1);
-
-      const staleAfter = (await fileMethods.findFileById(stale)) as {
-        status?: string;
-        previewError?: string;
-      } | null;
-      expect(staleAfter?.status).toBe('failed');
-      expect(staleAfter?.previewError).toBe('orphaned');
-
-      const freshAfter = (await fileMethods.findFileById(fresh)) as {
-        status?: string;
-      } | null;
-      expect(freshAfter?.status).toBe('pending');
-    });
-
-    it('does not touch records that are already ready or failed (idempotent)', async () => {
-      const ready = await makeFile({ ageMs: 60 * 60 * 1000, status: 'ready' });
-      const failed = await makeFile({ ageMs: 60 * 60 * 1000, status: 'failed' });
-
-      const count = await fileMethods.sweepOrphanedPreviews();
-      expect(count).toBe(0);
-
-      const readyAfter = (await fileMethods.findFileById(ready)) as { status?: string } | null;
-      const failedAfter = (await fileMethods.findFileById(failed)) as { status?: string } | null;
-      expect(readyAfter?.status).toBe('ready');
-      expect(failedAfter?.status).toBe('failed');
-    });
-
-    it('does not touch legacy records with no status field (back-compat)', async () => {
-      const legacy = await makeFile({ ageMs: 60 * 60 * 1000 }); // no status set
-      const count = await fileMethods.sweepOrphanedPreviews();
-      expect(count).toBe(0);
-      const after = (await fileMethods.findFileById(legacy)) as { status?: string } | null;
-      expect(after?.status).toBeUndefined();
-    });
-
-    it('respects a custom maxAgeMs cutoff', async () => {
-      const old10s = await makeFile({ ageMs: 10 * 1000, status: 'pending' });
-      const old1m = await makeFile({ ageMs: 60 * 1000, status: 'pending' });
-
-      // Cutoff = 30s — only the 60s-old record should be swept.
-      const count = await fileMethods.sweepOrphanedPreviews(30 * 1000);
-      expect(count).toBe(1);
-
-      const tenSecAfter = (await fileMethods.findFileById(old10s)) as { status?: string } | null;
-      const oneMinAfter = (await fileMethods.findFileById(old1m)) as {
-        status?: string;
-        previewError?: string;
-      } | null;
-      expect(tenSecAfter?.status).toBe('pending');
-      expect(oneMinAfter?.status).toBe('failed');
-      expect(oneMinAfter?.previewError).toBe('orphaned');
-    });
-
-    it('returns 0 when there are no stale pending records', async () => {
-      await makeFile({ ageMs: 30 * 1000, status: 'pending' });
-      const count = await fileMethods.sweepOrphanedPreviews();
-      expect(count).toBe(0);
-    });
-
-    describe('strict tenant isolation (boot-time recovery)', () => {
-      afterEach(() => {
-        delete process.env.TENANT_ISOLATION_STRICT;
-        _resetStrictCache();
-      });
-
-      it('throws under strict mode without runAsSystem', async () => {
-        await runAsSystem(() => makeFile({ ageMs: 10 * 60 * 1000, status: 'pending' }));
-        process.env.TENANT_ISOLATION_STRICT = 'true';
-        _resetStrictCache();
-        await expect(fileMethods.sweepOrphanedPreviews()).rejects.toThrow(
-          /Query attempted without tenant context in strict mode/,
-        );
-      });
-
-      it('succeeds under strict mode when wrapped in runAsSystem', async () => {
-        const stale = await runAsSystem(() =>
-          makeFile({ ageMs: 10 * 60 * 1000, status: 'pending' }),
-        );
-        process.env.TENANT_ISOLATION_STRICT = 'true';
-        _resetStrictCache();
-        const count = await runAsSystem(() => fileMethods.sweepOrphanedPreviews());
-        expect(count).toBe(1);
-        const after = (await runAsSystem(() => fileMethods.findFileById(stale))) as {
-          status?: string;
-          previewError?: string;
-        } | null;
-        expect(after?.status).toBe('failed');
-        expect(after?.previewError).toBe('orphaned');
-      });
     });
   });
 });

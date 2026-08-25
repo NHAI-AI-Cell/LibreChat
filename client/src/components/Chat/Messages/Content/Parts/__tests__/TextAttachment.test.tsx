@@ -13,10 +13,6 @@ jest.mock('~/hooks', () => ({
       };
       return translations[key] ?? key;
     },
-  /* `FileAttachment` calls this hook unconditionally to bridge the
-   * deferred-preview lifecycle. Stub to a no-op for tests that
-   * don't exercise the preview flow. */
-  useAttachmentPreviewSync: () => ({ status: 'ready', previewError: undefined, isPolling: false }),
   useExpandCollapse: (isExpanded: boolean) => ({
     style: { display: 'grid', gridTemplateRows: isExpanded ? '1fr' : '0fr' },
     ref: { current: null },

@@ -23,7 +23,6 @@ describe('normalizePath', () => {
     ['/api/messages/artifact/507f1f77bcf86cd799439012', '/api/messages/artifact/#id'],
     ['/api/convos/507f1f77bcf86cd799439011', '/api/convos/#id'],
     ['/api/files/507f1f77bcf86cd799439011', '/api/files/#id'],
-    ['/api/files/507f1f77bcf86cd799439011/preview', '/api/files/#id/preview'],
     ['/api/files/download/user-123/file-456', '/api/files/download/#id/#id'],
     ['/api/files/download-url/user-123/file-456', '/api/files/download-url/#id/#id'],
     ['/api/files/code/download/session-123/file-456', '/api/files/code/download/#id/#id'],

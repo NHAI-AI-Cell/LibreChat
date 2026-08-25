@@ -12,10 +12,8 @@ const artifactFilename = {
   'application/vnd.ant.react': 'App.tsx',
   'text/html': 'index.html',
   'application/vnd.code-html': 'index.html',
-  /* Office preview buckets — the backend produces a complete sanitized
-   * `index.html` document (head + body) and ships it via `attachment.text`.
-   * The Sandpack `static` template loads it as-is. See
-   * `packages/api/src/files/documents/html.ts`. */
+  /* Legacy Office preview buckets retained for already-materialized
+   * artifact records. Generated Office attachments no longer route here. */
   'application/vnd.librechat.docx-preview': 'index.html',
   'application/vnd.librechat.spreadsheet-preview': 'index.html',
   'application/vnd.librechat.presentation-preview': 'index.html',
@@ -51,8 +49,8 @@ const artifactTemplate: Record<
   'text/markdown': 'static',
   'text/md': 'static',
   'text/plain': 'static',
-  /* Office preview buckets ride the same static pipeline — the backend
-   * already sanitized the HTML, so we just hand it to Sandpack. */
+  /* Retain the static templates needed to render already-materialized
+   * legacy Office artifacts. New Office attachments bypass this map. */
   'application/vnd.librechat.docx-preview': 'static',
   'application/vnd.librechat.spreadsheet-preview': 'static',
   'application/vnd.librechat.presentation-preview': 'static',
@@ -149,8 +147,7 @@ const dependenciesMap: Record<
   'text/markdown': {},
   'text/md': {},
   'text/plain': {},
-  /* Office preview HTML is fully self-contained (CSS-only sheet tabs, no
-   * JS), so no Sandpack-side packages are needed. */
+  /* Already-materialized legacy Office HTML is self-contained. */
   'application/vnd.librechat.docx-preview': {},
   'application/vnd.librechat.spreadsheet-preview': {},
   'application/vnd.librechat.presentation-preview': {},
@@ -579,10 +576,8 @@ const EXTENSION_TO_TOOL_ARTIFACT_TYPE: Record<string, ToolArtifactType> = {
   txt: TOOL_ARTIFACT_TYPES.PLAIN_TEXT,
   // ODT has no rich HTML producer — it stays on the markdown-text path.
   odt: TOOL_ARTIFACT_TYPES.PLAIN_TEXT,
-  /* Office formats with rich HTML previews. The backend's
-   * `extractCodeArtifactText` path produces a complete sanitized HTML
-   * document via `bufferToOfficeHtml` and ships it through
-   * `attachment.text`. */
+  /* Legacy Office mappings remain available to direct utility callers.
+   * User-facing attachment routing classifies these as download-only. */
   docx: TOOL_ARTIFACT_TYPES.DOCX,
   csv: TOOL_ARTIFACT_TYPES.SPREADSHEET,
   xlsx: TOOL_ARTIFACT_TYPES.SPREADSHEET,
@@ -644,10 +639,8 @@ const MIME_TO_TOOL_ARTIFACT_TYPE: Record<string, ToolArtifactType> = {
   'text/x-lua': TOOL_ARTIFACT_TYPES.CODE,
   'text/x-swift': TOOL_ARTIFACT_TYPES.CODE,
   'text/css': TOOL_ARTIFACT_TYPES.CODE,
-  // Office MIME types — route to the rich HTML preview buckets when the
-  // canonical MIME is present. ODT remains on the plain-text path (no
-  // dedicated HTML producer). These complement the extension map for
-  // extensionless filenames.
+  // Legacy Office mappings retained for compatibility with direct utility
+  // callers. User-facing attachment routing preempts these as download-only.
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
     TOOL_ARTIFACT_TYPES.DOCX,
   'application/vnd.oasis.opendocument.text': TOOL_ARTIFACT_TYPES.PLAIN_TEXT,
@@ -657,12 +650,7 @@ const MIME_TO_TOOL_ARTIFACT_TYPE: Record<string, ToolArtifactType> = {
   'application/vnd.oasis.opendocument.spreadsheet': TOOL_ARTIFACT_TYPES.SPREADSHEET,
   'text/csv': TOOL_ARTIFACT_TYPES.SPREADSHEET,
   'application/csv': TOOL_ARTIFACT_TYPES.SPREADSHEET,
-  /* `text/comma-separated-values` is a legacy CSV MIME variant — rare
-   * in modern HTTP traffic but still emitted by some sandboxes. Kept
-   * in lock-step with the backend's `CSV_MIME_PATTERN` in
-   * `packages/api/src/files/documents/html.ts` so an extensionless CSV
-   * with this MIME doesn't slip through the client routing while the
-   * backend has already produced full HTML for it. */
+  /* Legacy CSV MIME variant emitted by some sandboxes. */
   'text/comma-separated-values': TOOL_ARTIFACT_TYPES.SPREADSHEET,
   'application/vnd.openxmlformats-officedocument.presentationml.presentation':
     TOOL_ARTIFACT_TYPES.PRESENTATION,
@@ -678,20 +666,10 @@ const MIME_TO_TOOL_ARTIFACT_TYPE: Record<string, ToolArtifactType> = {
  * type if so, or `null` to let the caller fall through to the existing
  * download / inline-text rendering.
  *
- * Empty `text` is tolerated for the plain-text and markdown buckets so a
- * file whose extraction is still TBD (e.g. pptx, or a docx where the
- * extractor errored) keeps visual parity with its docx/odt siblings — the
- * card still routes through the panel and `fileToArtifact` substitutes a
- * placeholder so the panel renders something sensible. The HTML, React,
- * and Mermaid buckets still require real content because their viewers
- * (sandpack / mermaid.js) error on empty input.
- */
-/**
- * Office preview buckets the backend MUST mark as `textFormat: 'html'`
- * before the client will inject `attachment.text` as `index.html`.
- * Routing to these buckets without the trust flag would let plain
- * text from RAG-uploaded `.docx` etc. (mammoth.extractRawText output)
- * be rendered as HTML — Codex P1 review on PR #12934.
+ * Empty `text` is tolerated for the plain-text and markdown buckets.
+ * HTML, React, and Mermaid still require real content because their
+ * viewers error on empty input. The Office branches below are retained
+ * only for legacy utility callers; active attachment routing preempts them.
  */
 const OFFICE_HTML_BUCKETS: ReadonlySet<ToolArtifactType> = new Set([
   TOOL_ARTIFACT_TYPES.DOCX,
@@ -716,13 +694,8 @@ export function detectArtifactTypeFromFile(
   const byBareName = byExtension
     ? undefined
     : lookupOwn(EXTENSION_TO_TOOL_ARTIFACT_TYPE, bareNameFromBasename(base));
-  /* Exact-match MIME lookup first; for the spreadsheet bucket the
-   * backend's `officeHtmlBucket` accepts the broad `excelMimeTypes`
-   * regex (covers `application/x-ms-excel`, `application/x-xls`,
-   * `application/msexcel`, `application/x-dos_ms_excel`, etc.). The
-   * client must accept the same set or extensionless XLS uploads with
-   * legacy MIMEs would have backend HTML produced but never get
-   * routed/registered on the panel. */
+  /* Keep the broad legacy Excel MIME aliases aligned with old records.
+   * Active generated-file routing handles them as download-only first. */
   const normalizedMime = baseMime(attachment.type);
   const byMime =
     lookupOwn(MIME_TO_TOOL_ARTIFACT_TYPE, normalizedMime) ??
@@ -764,12 +737,8 @@ export function detectArtifactTypeFromFile(
     type !== TOOL_ARTIFACT_TYPES.MARKDOWN &&
     type !== TOOL_ARTIFACT_TYPES.CODE
   ) {
-    /* HTML, REACT, MERMAID, and the office preview buckets all require
-     * real content — their renderers (sandpack iframes / mermaid.js /
-     * the office HTML pipeline) error or render blank without it. The
-     * artifact stays unregistered until the backend produces text;
-     * `ToolArtifactCard`'s self-heal effect re-fires on drift so the
-     * card transitions cleanly when text arrives. */
+    /* HTML, React, Mermaid, and legacy Office buckets require real content.
+     * `ToolArtifactCard`'s self-heal effect re-fires when text arrives. */
     return null;
   }
   return type;

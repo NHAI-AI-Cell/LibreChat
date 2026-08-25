@@ -20,19 +20,8 @@ export default function useAttachments({
     if (!live || live.length === 0) {
       return attachments;
     }
-    /* DB-loaded attachments are the source of truth for which
-     * attachments belong to this message, but live entries (from the
-     * SSE handler / `useAttachmentPreviewSync` polling) carry fresher
-     * lifecycle fields — `status`, `text`, `textFormat`,
-     * `previewError`. Without this merge, the deferred-preview flow
-     * would render "stuck pending" forever on a loaded conversation:
-     * the message saved to DB at end-of-run has the immediate-persist
-     * snapshot (`status: 'pending'`, `text: null`); the file record
-     * itself updates to `'ready'` later, but the message's
-     * `attachments` array doesn't get rewritten. Polling fetches the
-     * resolved record into `messageAttachmentsMap`; merging here lets
-     * `artifactTypeForAttachment` see the resolved text/textFormat
-     * and route through the proper PanelArtifact card. */
+    /* DB-loaded attachments decide membership; live SSE entries may
+     * carry fresher file metadata for the same `file_id`. */
     const liveByFileId = new Map<string, TAttachment>();
     for (const a of live) {
       const id = (a as Partial<TFile>).file_id;

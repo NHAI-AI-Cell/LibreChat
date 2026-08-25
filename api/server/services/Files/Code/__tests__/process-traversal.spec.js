@@ -34,13 +34,6 @@ jest.mock('@librechat/api', () => {
      * downstream consumers don't see a phantom format. */
     getExtractedTextFormat: jest.fn(() => null),
     getStorageMetadata: jest.fn(() => ({})),
-    /* Pass-through `withTimeout`: this suite asserts traversal sanitization,
-     * not deferred preview timing. */
-    withTimeout: async (promise) => promise,
-    /* These traversal cases all use non-office filenames — keep the
-     * inline (non-finalize) path so existing assertions on a single
-     * createFile call hold. */
-    hasOfficeHtmlPath: jest.fn(() => false),
     /* Identity-helper stub mirroring `packages/api/src/files/code/identity.ts`.
      * `processCodeOutput` calls this for every output download URL;
      * traversal cases don't care about the query shape, just that it
@@ -135,8 +128,9 @@ describe('processCodeOutput path traversal protection', () => {
     expect(mockSanitizeArtifactPath).toHaveBeenCalledWith('../../../tmp/poc.txt');
     const call = mockSaveBuffer.mock.calls[0][0];
     /* `flattenArtifactPath` is identity for already-flat names; the assert
-     * is against the storage-key composition (`<file_id>__<flat>`). */
-    expect(call.fileName).toBe('mock-uuid__sanitized-name.txt');
+     * is against the storage-key composition
+     * (`<file_id>__<publication_id>__<flat>`). */
+    expect(call.fileName).toBe('mock-uuid__mock-uuid__sanitized-name.txt');
   });
 
   test('sanitized name is stored as filename in the file record', async () => {

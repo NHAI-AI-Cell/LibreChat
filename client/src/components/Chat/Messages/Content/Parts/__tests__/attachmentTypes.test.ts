@@ -73,8 +73,8 @@ describe('isImageAttachment', () => {
 describe('isTextAttachment', () => {
   it('returns true when text is a non-empty string', () => {
     const attachment = baseAttachment({
-      filename: 'output.csv',
-      text: 'a,b,c\n1,2,3',
+      filename: 'output.json',
+      text: '{"answer":42}',
     } as Partial<TAttachment>);
     expect(isTextAttachment(attachment)).toBe(true);
   });
@@ -95,6 +95,15 @@ describe('isTextAttachment', () => {
     const attachment = baseAttachment({
       filename: 'broken.txt',
       text: null as unknown as string,
+    } as Partial<TAttachment>);
+    expect(isTextAttachment(attachment)).toBe(false);
+  });
+
+  it('returns false for legacy Office preview markup', () => {
+    const attachment = baseAttachment({
+      filename: 'legacy.pptx',
+      text: '<html>old preview</html>',
+      textFormat: 'html',
     } as Partial<TAttachment>);
     expect(isTextAttachment(attachment)).toBe(false);
   });
@@ -133,15 +142,24 @@ describe('artifactTypeForAttachment', () => {
   });
 
   it('returns null for unsupported extensions', () => {
-    /* CSV / DOCX / XLSX / PPTX now route through the office preview
-     * buckets (rich HTML preview); use a binary type with no preview
-     * pipeline instead. */
     const attachment = baseAttachment({
       filename: 'photo.jpg',
       text: undefined,
     });
     expect(artifactTypeForAttachment(attachment)).toBeNull();
   });
+
+  it.each(['report.docx', 'data.csv', 'workbook.xlsx', 'slides.pptx'])(
+    'returns null for download-only %s even when legacy HTML is present',
+    (filename) => {
+      const attachment = baseAttachment({
+        filename,
+        text: '<html>old preview</html>',
+        textFormat: 'html',
+      } as Partial<TAttachment>);
+      expect(artifactTypeForAttachment(attachment)).toBeNull();
+    },
+  );
 });
 
 describe('isInternalSandboxArtifact', () => {

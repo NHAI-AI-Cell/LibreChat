@@ -1,8 +1,32 @@
 import { useMemo, useState, useCallback, memo } from 'react';
+import { classifyGeneratedFile } from 'librechat-data-provider';
 import type { TFile, TMessage } from 'librechat-data-provider';
 import FileContainer from '~/components/Chat/Input/Files/FileContainer';
-import FilePreviewDialog from './FilePreviewDialog';
+import FilePreviewDialog, { getFilePreviewKind } from './FilePreviewDialog';
+import { useAttachmentLink } from './Parts/LogLink';
 import Image from './Image';
+
+const MessageFile = memo(
+  ({ file, onPreview }: { file: Partial<TFile>; onPreview: (file: Partial<TFile>) => void }) => {
+    const { handleDownload } = useAttachmentLink({
+      href: file.filepath ?? '',
+      filename: file.filename ?? '',
+      file_id: file.file_id,
+      user: file.user,
+      source: file.source,
+    });
+    const downloadOnly =
+      classifyGeneratedFile({ filename: file.filename, mimeType: file.type }).kind ===
+      'download-only';
+    const canPreview =
+      !downloadOnly && getFilePreviewKind(file.filename ?? '', file.type) !== false;
+
+    return (
+      <FileContainer file={file} onClick={canPreview ? () => onPreview(file) : handleDownload} />
+    );
+  },
+);
+MessageFile.displayName = 'MessageFile';
 
 const Files = ({ message }: { message?: TMessage }) => {
   const imageFiles = useMemo(() => {
@@ -25,11 +49,7 @@ const Files = ({ message }: { message?: TMessage }) => {
     <>
       {otherFiles.length > 0 &&
         otherFiles.map((file) => (
-          <FileContainer
-            key={file.file_id}
-            file={file as TFile}
-            onClick={() => setSelectedFile(file)}
-          />
+          <MessageFile key={file.file_id} file={file} onPreview={setSelectedFile} />
         ))}
       {imageFiles.length > 0 &&
         imageFiles.map((file) => (

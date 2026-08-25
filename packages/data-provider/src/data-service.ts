@@ -430,27 +430,6 @@ export const getFiles = (): Promise<f.TFile[]> => {
   return request.get(endpoints.files());
 };
 
-/**
- * Poll the lifecycle of an inline file preview. Returns the smallest
- * shape needed to drive the UI:
- *   - `status` always present (defaults to `'ready'` server-side for
- *     legacy records that pre-date the field).
- *   - `text` and `textFormat` only when `status === 'ready'` and text
- *     was extracted (preserves the HTML-or-null security contract).
- *   - `previewError` only when `status === 'failed'`.
- *
- * Called from `useFilePreview`; React Query's `refetchInterval`
- * polls while `status === 'pending'` and stops on terminal status.
- */
-export const getFilePreview = (fileId: string): Promise<f.TFilePreview> => {
-  return request.get(endpoints.filePreview(fileId));
-};
-
-/** Preview status for a snapshotted file served through a shared link. */
-export const getSharedFilePreview = (shareId: string, fileId: string): Promise<f.TFilePreview> => {
-  return request.get(endpoints.sharedFilePreview(shareId, fileId));
-};
-
 export const getAgentFiles = (agentId: string): Promise<f.TFile[]> => {
   return request.get(endpoints.agentFiles(agentId));
 };

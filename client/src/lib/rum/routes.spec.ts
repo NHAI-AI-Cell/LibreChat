@@ -9,7 +9,7 @@ describe('normalizeRumPath', () => {
 
   it('normalizes generic UUID and ObjectId path segments', () => {
     expect(normalizeRumPath('/files/550e8400-e29b-41d4-a716-446655440000')).toBe('/files/:id');
-    expect(normalizeRumPath('/files/65a5e0a7d1c2b3a4f5e6d789/preview')).toBe('/files/:id/preview');
+    expect(normalizeRumPath('/files/65a5e0a7d1c2b3a4f5e6d789/content')).toBe('/files/:id/content');
   });
 
   it('preserves static routes', () => {

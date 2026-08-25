@@ -12,6 +12,7 @@ const {
   updateSharedLinkPermissionsExpiration,
   isActiveExpirationDate,
   getSharedLinkExpiration,
+  resolveStoredObjectRef,
 } = require('@librechat/api');
 const {
   logger,
@@ -24,7 +25,6 @@ const {
 const { FileSources, PermissionTypes, Permissions } = require('librechat-data-provider');
 const {
   getFiles,
-  updateFile,
   getSharedMessages,
   createSharedLink,
   updateSharedLink,
@@ -75,10 +75,6 @@ const allowSharedLinks =
 /** Run within the snapshot file's tenant context (mirrors canAccessSharedLink). */
 const runWithTenant = (tenantId, fn) =>
   tenantId ? tenantStorage.run({ tenantId }, fn) : runAsSystem(fn);
-
-/** Mirrors the owner preview route: pending records older than this are swept to
- * 'failed' on the next poll so the client poller terminates. */
-const PREVIEW_LAZY_SWEEP_CUTOFF_MS = 2 * 60 * 1000;
 
 const getShareStartupPayload = async () => {
   const tenantId = getTenantId();
@@ -146,17 +142,18 @@ const resolveShareFile = async (req, res, next) => {
       return res.status(404).json({ message: 'File no longer available' });
     }
 
-    // Pin to the snapshotted version so an old link can't surface post-share content
-    // after a reused file_id (e.g. code-exec same-filename outputs) is overwritten.
-    // previewRevision changes for deferred/office files; `bytes` catches other
-    // overwrites that change size, and is stable across S3 URL refresh and the
-    // pending->ready transition (which don't alter file size). Same-size content
-    // swaps remain a best-effort gap inherent to the no-byte-copy design.
+    // Pin to the exact stored object so an old link cannot follow a later
+    // publication that reused the logical file_id. Legacy previewRevision and
+    // byte checks remain as additional rejection signals for mutable old rows.
+    const snapshotObject = resolveStoredObjectRef(snapshot);
+    const liveObject = resolveStoredObjectRef(liveFile);
+    const storedObjectChanged =
+      !snapshotObject || !liveObject || snapshotObject.identity !== liveObject.identity;
     const revisionChanged =
       (snapshot.previewRevision ?? null) !== (liveFile.previewRevision ?? null);
     const bytesChanged =
       snapshot.bytes != null && liveFile.bytes != null && snapshot.bytes !== liveFile.bytes;
-    if (revisionChanged || bytesChanged) {
+    if (storedObjectChanged || revisionChanged || bytesChanged) {
       logger.warn(
         `[shareFileAccess] Snapshot version mismatch for file ${file_id} (share ${shareId})`,
       );
@@ -164,7 +161,7 @@ const resolveShareFile = async (req, res, next) => {
     }
 
     req.shareFile = snapshot;
-    req.liveFile = liveFile;
+    req.shareStoredObject = snapshotObject;
     return next();
   } catch (error) {
     logger.error('[shareFileAccess] Error resolving shared file:', error);
@@ -173,7 +170,7 @@ const resolveShareFile = async (req, res, next) => {
 };
 
 /** Stream (or redirect to) a snapshotted file from its original stored object. */
-const streamSharedFile = async (req, res, file, requestedDisposition) => {
+const streamSharedFile = async (req, res, file, storedObject, requestedDisposition) => {
   const source = file.source || FileSources.local;
   const { getDownloadStream, getDownloadURL } = getStrategyFunctions(source);
 
@@ -205,10 +202,7 @@ const streamSharedFile = async (req, res, file, requestedDisposition) => {
     return res.status(501).send('Not Implemented');
   }
 
-  // Strip any cache-busting query string (e.g. code-output images add `?v=...`) so
-  // the local stream resolves the real filename, not a literal `*.png?v=...` path.
-  const streamPath = (file.storageKey || file.filepath || '').split('?')[0];
-  const fileStream = await getDownloadStream(req, streamPath);
+  const fileStream = await getDownloadStream(req, storedObject.streamPath);
   fileStream.on('error', (error) => {
     logger.error('[shareFileAccess] Stream error:', error);
   });
@@ -260,53 +254,6 @@ if (allowSharedLinks) {
     },
   );
 
-  /**
-   * Preview status for a snapshotted file. Read live from the file record so the
-   * status is always current (deferred previews may resolve after the share was
-   * created) and large extracted text is never embedded in the share document.
-   */
-  router.get(
-    '/:shareId/files/:file_id/preview',
-    optionalJwtAuth,
-    optionalShareFileAuth,
-    canAccessSharedLink,
-    configMiddleware,
-    resolveShareFile,
-    async (req, res) => {
-      try {
-        const { file_id } = req.params;
-        let liveFile = req.liveFile;
-        // Lazy-sweep orphaned pending records to 'failed' so the client preview
-        // poller reaches a terminal state (mirrors the owner preview route).
-        if (liveFile?.status === 'pending' && liveFile.updatedAt instanceof Date) {
-          const ageMs = Date.now() - liveFile.updatedAt.getTime();
-          if (ageMs > PREVIEW_LAZY_SWEEP_CUTOFF_MS) {
-            const swept = await updateFile(
-              { file_id, status: 'failed', previewError: 'orphaned' },
-              { status: 'pending', updatedAt: liveFile.updatedAt },
-            );
-            if (swept) {
-              liveFile = swept;
-            }
-          }
-        }
-        const status = liveFile?.status || 'ready';
-        const payload = { file_id, status };
-        if (status === 'ready' && liveFile?.text != null) {
-          payload.text = liveFile.text;
-          payload.textFormat = liveFile.textFormat ?? null;
-        } else if (status === 'failed' && liveFile?.previewError) {
-          payload.previewError = liveFile.previewError;
-        }
-        res.set('Cache-Control', 'private, no-store');
-        return res.status(200).json(payload);
-      } catch (error) {
-        logger.error('[shareFileAccess] Error fetching shared preview:', error);
-        return res.status(500).json({ message: 'Error fetching preview' });
-      }
-    },
-  );
-
   /** Download a snapshotted file (attachment disposition). */
   router.get(
     '/:shareId/files/:file_id/download',
@@ -318,7 +265,7 @@ if (allowSharedLinks) {
     async (req, res) => {
       try {
         await runWithTenant(req.shareFile.tenantId, () =>
-          streamSharedFile(req, res, req.shareFile, 'attachment'),
+          streamSharedFile(req, res, req.shareFile, req.shareStoredObject, 'attachment'),
         );
       } catch (error) {
         logger.error('[shareFileAccess] Error downloading shared file:', error);
@@ -340,7 +287,7 @@ if (allowSharedLinks) {
     async (req, res) => {
       try {
         await runWithTenant(req.shareFile.tenantId, () =>
-          streamSharedFile(req, res, req.shareFile, 'inline'),
+          streamSharedFile(req, res, req.shareFile, req.shareStoredObject, 'inline'),
         );
       } catch (error) {
         logger.error('[shareFileAccess] Error serving shared file:', error);

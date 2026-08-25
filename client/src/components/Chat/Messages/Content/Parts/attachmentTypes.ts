@@ -1,4 +1,4 @@
-import { imageExtRegex } from 'librechat-data-provider';
+import { classifyGeneratedFile, imageExtRegex } from 'librechat-data-provider';
 import type { TAttachment, TAttachmentMetadata, TFile } from 'librechat-data-provider';
 import type { ToolArtifactType } from '~/utils/artifacts';
 import { detectArtifactTypeFromFile } from '~/utils/artifacts';
@@ -156,11 +156,25 @@ export const isImageAttachment = (attachment: TAttachment): boolean => {
 };
 
 /**
+ * Generated Office-style files use the stored binary as their only reliable
+ * representation. This check must run before artifact/text routing so legacy
+ * preview fields cannot reopen the retired HTML preview path.
+ */
+export const isDownloadOnlyAttachment = (attachment: Partial<TAttachment>): boolean =>
+  classifyGeneratedFile({
+    filename: attachment.filename,
+    mimeType: attachment.type,
+  }).kind === 'download-only';
+
+/**
  * An attachment renders inline as text when the backend has populated a
- * non-empty `text` field on the underlying file record. Empty strings are
- * treated as "no inline text available" and fall through to the download UI.
+ * non-empty `text` field. Download-only formats are excluded even when an
+ * older record still contains retired preview markup.
  */
 export const isTextAttachment = (attachment: TAttachment): boolean => {
+  if (isDownloadOnlyAttachment(attachment)) {
+    return false;
+  }
   const { text } = attachment as TFile & TAttachmentMetadata;
   return typeof text === 'string' && text.length > 0;
 };
@@ -172,6 +186,9 @@ export const isTextAttachment = (attachment: TAttachment): boolean => {
  * the message-render code reads cleanly.
  */
 export const artifactTypeForAttachment = (attachment: TAttachment): ToolArtifactType | null => {
+  if (isDownloadOnlyAttachment(attachment)) {
+    return null;
+  }
   const file = attachment as TFile & TAttachmentMetadata;
   return detectArtifactTypeFromFile(file);
 };

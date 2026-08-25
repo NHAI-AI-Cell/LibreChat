@@ -25,11 +25,8 @@ const FileContainer = ({
   displayName?: string;
   /**
    * Optional override for the subtitle line (defaults to the file
-   * type's localized title — e.g. "PowerPoint Presentation"). Used by
-   * the deferred-preview flow to surface "Preparing preview…" /
-   * "Preview unavailable" inline within the chip rather than as a
-   * loose-feeling annotation below it. Pass a ReactNode so callers
-   * can include icons (spinner, alert) alongside the text.
+   * type's localized title — e.g. "PowerPoint Presentation"). Pass a
+   * ReactNode so callers can include richer inline labels.
    */
   subtitle?: ReactNode;
   buttonClassName?: string;
